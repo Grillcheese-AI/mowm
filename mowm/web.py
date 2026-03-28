@@ -35,7 +35,11 @@ except ImportError:
     HAS_TTS = False
 
 
-def _build_pipeline(k: int = 4, l: int = 32) -> dict[str, Any]:  # noqa: E741
+def _build_pipeline(
+    k: int = 4,
+    l: int = 32,  # noqa: E741
+    codebook_path: str | None = None,
+) -> dict[str, Any]:
     """Build the full MoWM stack."""
     lib = AxiomLibrary(k=k, l=l)
 
@@ -85,9 +89,31 @@ def _build_pipeline(k: int = 4, l: int = 32) -> dict[str, Any]:  # noqa: E741
     for src, tgt, pol, strength in edges:
         causal.add_edge(src, tgt, pol, strength)
 
+    # Load NV-Embed codebook if available
+    seq_encoder = None
+    codebook_stats = {}
+    if codebook_path:
+        try:
+            from mowm.sequence_encoder import SequenceEncoder
+            seq_encoder = SequenceEncoder.from_codebook(
+                codebook_path, k=k, l=l,
+            )
+            cb = np.load(codebook_path, allow_pickle=True)
+            codebook_stats = {
+                "embeddings": int(cb["embeddings"].shape[0]),
+                "latent_dim": int(cb["latent_dim"]),
+                "domains": list(cb["domain_names"]),
+                "has_projection": "projection_matrix" in cb,
+            }
+            print(f"  Codebook: {codebook_stats['embeddings']} embeddings, "
+                  f"{len(codebook_stats['domains'])} domains")
+        except Exception as e:
+            print(f"  Codebook load failed: {e}")
+
     qa = QAPipeline(
         library=lib, executor=executor, logic=logic,
         causal=causal, k=k, l=l,
+        codebook_path=codebook_path,
     )
 
     return {
@@ -96,6 +122,8 @@ def _build_pipeline(k: int = 4, l: int = 32) -> dict[str, Any]:  # noqa: E741
         "logic": logic,
         "causal": causal,
         "qa": qa,
+        "seq_encoder": seq_encoder,
+        "codebook_stats": codebook_stats,
         "k": k,
         "l": l,
     }
@@ -237,22 +265,34 @@ def create_app(stack: dict[str, Any]):
         except Exception as e:
             return f"**Error:** {e}"
 
+    codebook_stats = stack.get("codebook_stats", {})
+
     def get_stats() -> str:
-        return (
-            _format_library_stats(lib) + "\n\n---\n\n"
-            + _format_causal_graph(causal)
-        )
+        parts = [_format_library_stats(lib)]
+        if codebook_stats:
+            parts.append("\n\n---\n\n### NV-Embed Codebook\n")
+            parts.append(
+                f"**Embeddings:** {codebook_stats.get('embeddings', 0):,}\n"
+                f"**Latent dim:** {codebook_stats.get('latent_dim', 0)}\n"
+                f"**Projection matrix:** "
+                f"{'loaded' if codebook_stats.get('has_projection') else 'not loaded'}\n"
+                f"**Domains:** {', '.join(codebook_stats.get('domains', []))}"
+            )
+        parts.append("\n\n---\n\n" + _format_causal_graph(causal))
+        return "".join(parts)
 
     # Build the Gradio interface
     with gr.Blocks(
         title="MoWM — Mixture of World Models",
     ) as app:
+        embed_count = codebook_stats.get("embeddings", 0)
+        embed_str = f" | {embed_count:,} NV-Embed vectors" if embed_count else ""
         gr.Markdown(
             "# 🌍 MoWM — Mixture of World Models\n"
             "**Self-organizing neuro-symbolic reasoning engine** "
             f"| {len(lib)} axioms across "
-            f"{len(lib.domains())} domains "
-            f"| 720 tests passing\n\n"
+            f"{len(lib.domains())} domains"
+            f"{embed_str}\n\n"
             "*Ask questions. Get deterministic, traceable answers "
             "backed by named axioms. No hallucination possible.*"
         )
@@ -378,6 +418,10 @@ def main() -> None:
         help="Create a public Gradio share link",
     )
     parser.add_argument(
+        "--codebook", type=str, default=None,
+        help="Path to NV-Embed codebook .npz (e.g., mowm_nvembed_codebook.npz)",
+    )
+    parser.add_argument(
         "--k", type=int, default=4,
         help="VSA block count (default: 4, production: 80)",
     )
@@ -389,7 +433,7 @@ def main() -> None:
 
     print("Building MoWM stack...", end=" ", flush=True)
     t0 = time.time()
-    stack = _build_pipeline(k=args.k, l=args.l)
+    stack = _build_pipeline(k=args.k, l=args.l, codebook_path=args.codebook)
     print(f"done ({time.time() - t0:.1f}s, "
           f"{len(stack['library'])} axioms)")
 
