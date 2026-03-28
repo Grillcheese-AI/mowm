@@ -18,6 +18,7 @@ from mowm.axiom_library import AxiomLibrary
 from mowm.executor import SafeFormulaExecutor
 from mowm.qa.augmented_solver import AugmentedSolver
 from mowm.qa.classifier import DomainClassifier
+from mowm.qa.expert_bid_classifier import ExpertBidClassifier
 from mowm.qa.direct_solver import DirectSolver, QAResponse
 from mowm.qa.formatter import ResponseFormatter
 from mowm.qa.parser import QuestionParser
@@ -56,7 +57,9 @@ class QAPipeline:
         self._causal = causal
         self._fmt = ResponseFormatter()
         self._parser = QuestionParser()
-        self._classifier = DomainClassifier(library, codebook_path=codebook_path)
+        # Expert-bidding classifier: domains compete based on axiom content
+        # No hardcoded routing tables — competence derived from axioms
+        self._classifier = ExpertBidClassifier(library)
 
         # Build a null causal graph if none provided (DirectSolver requires one)
         if self._causal is None:

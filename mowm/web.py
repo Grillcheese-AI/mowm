@@ -206,6 +206,12 @@ def create_app(stack: dict[str, Any]):
     causal: CausalGraph = stack["causal"]
     executor: SafeFormulaExecutor = stack["executor"]
 
+    def explain_routing(question: str) -> str:
+        """Show expert bid breakdown for a question."""
+        if not question.strip():
+            return "*Enter a question to see expert bids.*"
+        return qa._classifier.explain_routing(question)
+
     def ask_question(question: str, facts_str: str) -> str:
         if not question.strip():
             return "*Please enter a question.*"
@@ -394,6 +400,47 @@ def create_app(stack: dict[str, Any]):
                 )
 
             # Tab 3: Knowledge Base
+            # Tab 4: Expert Routing
+            with gr.Tab("🎯 Expert Routing"):
+                gr.Markdown(
+                    "### Expert Bidding — See How Domains Compete\n\n"
+                    "*No hardcoded routing. Each domain's axiom set bids "
+                    "on the question. Highest bid wins.*"
+                )
+                route_input = gr.Textbox(
+                    label="Question",
+                    placeholder="What is superposition in quantum mechanics?",
+                    lines=2,
+                )
+                route_btn = gr.Button("Show Expert Bids", variant="primary")
+                route_output = gr.Markdown(
+                    value="*Enter a question to see expert bids.*",
+                )
+                route_btn.click(
+                    explain_routing,
+                    inputs=route_input,
+                    outputs=route_output,
+                )
+                route_input.submit(
+                    explain_routing,
+                    inputs=route_input,
+                    outputs=route_output,
+                )
+                gr.Examples(
+                    examples=[
+                        "What is the force when m=10 and a=9.8?",
+                        "Explain quantum superposition",
+                        "What is superposition in circuit analysis?",
+                        "How does DNA encode genetic information?",
+                        "What is the Nash equilibrium?",
+                        "Explain modus ponens",
+                        "How does RSA encryption work?",
+                        "What is the harmonic series?",
+                    ],
+                    inputs=route_input,
+                )
+
+            # Tab 5: Knowledge Base
             with gr.Tab("📚 Knowledge Base"):
                 stats_output = gr.Markdown(value=get_stats())
                 refresh_btn = gr.Button("Refresh Stats")
