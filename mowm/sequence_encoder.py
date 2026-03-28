@@ -271,6 +271,47 @@ class SequenceEncoder:
 
         return self._bc.bundle(bound_vecs).astype(np.float32)
 
+    def encode_contextualized_tokens(
+        self,
+        embeddings: list[np.ndarray],
+        attention_module: "CombinerAxialAttention",
+    ) -> np.ndarray:
+        """Encode a sequence using Combiner Attention before VSA binding.
+
+        Tokens exchange global context in O(L*sqrt(L)) time before being
+        compressed into block-code VSA space. This gives the VSA encoder
+        full contextual awareness — "bank" at position 5 knows whether
+        it's a river bank or financial bank from surrounding context.
+
+        Args:
+            embeddings: List of 1-D arrays of shape (latent_dim,).
+            attention_module: Initialized CombinerAxialAttention instance
+                from mowm.combiner.
+
+        Returns:
+            Context-aware block-code VSA vector of shape (k, l).
+        """
+        if not embeddings:
+            return self._zero()
+
+        # 1. Stack into sequence tensor (L, latent_dim)
+        sequence_tensor = np.stack(embeddings, axis=0).astype(np.float32)
+
+        # 2. Apply Sub-Quadratic Combiner Attention
+        # Every token now contains information about the entire sequence
+        contextualized = attention_module.forward(sequence_tensor)
+
+        # 3. Project and Bind into VSA Space
+        bound_vecs: list[np.ndarray] = []
+        for pos in range(len(embeddings)):
+            ctx_emb = contextualized[pos]
+            vsa_vec = self._project_embedding(ctx_emb)
+            pos_vec = self._pos_vec(pos)
+            bound_vecs.append(self._bc.bind(vsa_vec, pos_vec))
+
+        # 4. Bundle into the final compositional state
+        return self._bc.bundle(bound_vecs).astype(np.float32)
+
     def save_projection(self, path: str) -> None:
         """Save the projection matrix P to a .npy file.
 

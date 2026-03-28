@@ -149,3 +149,59 @@ class TestOrthogonalProjection:
         enc1 = SequenceEncoder(k=K, l=L, seed=7, latent_dim=LATENT_DIM)
         enc2 = SequenceEncoder(k=K, l=L, seed=7, latent_dim=LATENT_DIM)
         np.testing.assert_array_equal(enc1._P, enc2._P)
+
+
+# ── Combiner-Axial Attention integration ─────────────────────────────
+
+
+class TestContextualizedEncoding:
+    """Test encode_contextualized_tokens with CombinerAxialAttention."""
+
+    def setup_method(self):
+        from mowm.combiner import CombinerAxialAttention
+        self.enc = SequenceEncoder(k=K, l=L, seed=0, latent_dim=LATENT_DIM)
+        self.attn = CombinerAxialAttention(
+            d_model=LATENT_DIM, block_size=0, num_heads=2,
+            rng=np.random.default_rng(42),
+        )
+
+    def test_contextualized_shape(self):
+        rng = np.random.default_rng(42)
+        embs = [rng.standard_normal(LATENT_DIM).astype(np.float32) for _ in range(5)]
+        vec = self.enc.encode_contextualized_tokens(embs, self.attn)
+        assert vec.shape == (K, L)
+        assert vec.dtype == np.float32
+
+    def test_contextualized_nonzero(self):
+        rng = np.random.default_rng(42)
+        embs = [rng.standard_normal(LATENT_DIM).astype(np.float32) for _ in range(3)]
+        vec = self.enc.encode_contextualized_tokens(embs, self.attn)
+        assert np.any(vec != 0)
+
+    def test_contextualized_empty(self):
+        vec = self.enc.encode_contextualized_tokens([], self.attn)
+        assert vec.shape == (K, L)
+        assert np.allclose(vec, 0.0)
+
+    def test_contextualized_differs_from_plain(self):
+        rng = np.random.default_rng(42)
+        embs = [rng.standard_normal(LATENT_DIM).astype(np.float32) for _ in range(4)]
+        plain = self.enc.encode_embedded_tokens(embs)
+        ctx = self.enc.encode_contextualized_tokens(embs, self.attn)
+        bc = BlockCodes(k=K, l=L)
+        sim = bc.similarity(plain, ctx)
+        # Contextualized should differ from plain (attention changes embeddings)
+        assert sim < 0.99
+
+    def test_contextualized_single_token(self):
+        rng = np.random.default_rng(42)
+        embs = [rng.standard_normal(LATENT_DIM).astype(np.float32)]
+        vec = self.enc.encode_contextualized_tokens(embs, self.attn)
+        assert vec.shape == (K, L)
+
+    def test_contextualized_long_sequence(self):
+        """Test with longer sequence to verify sub-quadratic scaling."""
+        rng = np.random.default_rng(42)
+        embs = [rng.standard_normal(LATENT_DIM).astype(np.float32) for _ in range(20)]
+        vec = self.enc.encode_contextualized_tokens(embs, self.attn)
+        assert vec.shape == (K, L)
