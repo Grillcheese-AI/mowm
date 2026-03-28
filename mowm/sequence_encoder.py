@@ -61,17 +61,28 @@ class SequenceEncoder:
         # Cache for position vectors (position index → vector).
         self._pos_cache: dict[int, np.ndarray] = {}
 
-        # Orthogonal projection matrix P: shape (k*l, latent_dim).
+        # Projection matrix P: shape (k*l, latent_dim).
         # Option 1: Load precomputed P (fast — no QR needed)
-        # Option 2: Compute via QR decomposition (slow for large dims)
+        # Option 2: Compute via QR when k*l >= latent_dim (orthogonal)
+        # Option 3: Gaussian random projection when k*l < latent_dim
+        #           (Johnson-Lindenstrauss — approximately preserves distances)
         self._P: np.ndarray | None = None
         if projection_matrix is not None:
             self._P = projection_matrix.astype(np.float32)
             self._latent_dim = projection_matrix.shape[1]
         elif latent_dim is not None:
             rng = np.random.default_rng(seed)
-            Q, _ = np.linalg.qr(rng.standard_normal((k * l, latent_dim)))
-            self._P = Q.astype(np.float32)
+            vsa_dim = k * l
+            if vsa_dim >= latent_dim:
+                # Full QR — columns are orthonormal, preserves cosine exactly
+                Q, _ = np.linalg.qr(rng.standard_normal((vsa_dim, latent_dim)))
+                self._P = Q.astype(np.float32)
+            else:
+                # Gaussian random projection (JL lemma) — scaled for variance
+                scale = 1.0 / np.sqrt(vsa_dim)
+                self._P = (
+                    scale * rng.standard_normal((vsa_dim, latent_dim))
+                ).astype(np.float32)
 
     # ------------------------------------------------------------------
     # Internal helpers
