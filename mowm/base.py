@@ -214,3 +214,88 @@ class BaseRouter(ABC):
     def prune(self, current_step: int) -> list[int]:
         """Prune inactive worlds. Returns list of pruned world IDs."""
         ...
+
+
+# ── v0.2.0 ABCs ─────────────────────────────────────────────────────────────
+
+
+class BaseExecutor(ABC):
+    """Abstract base for executing axiom formula strings."""
+
+    @abstractmethod
+    def execute(
+        self,
+        formula_str: str,
+        inputs: dict[str, float],
+    ) -> float | np.ndarray:
+        """Evaluate a formula string with named variable inputs."""
+        ...
+
+    @abstractmethod
+    def parse(self, formula_str: str):
+        """Parse a formula string into an internal representation."""
+        ...
+
+
+class BaseCausalGraph(ABC):
+    """Abstract base for signed directed causal graphs."""
+
+    @abstractmethod
+    def add_node(self, name: str, domain: str, vector: np.ndarray) -> None:
+        ...
+
+    @abstractmethod
+    def add_edge(
+        self, source: str, target: str, polarity: str, strength: float,
+    ) -> None:
+        ...
+
+    @abstractmethod
+    def remove_node(self, name: str) -> None:
+        ...
+
+    @abstractmethod
+    def remove_edge(self, source: str, target: str) -> None:
+        ...
+
+    @abstractmethod
+    def propagate(self, node: str, delta: float) -> dict[str, float]:
+        ...
+
+    @abstractmethod
+    def counterfactual(self, node: str, value: float) -> dict[str, float]:
+        ...
+
+    @abstractmethod
+    def find_paths(self, source: str, target: str) -> list[list[str]]:
+        ...
+
+    @abstractmethod
+    def feedback_loops(self) -> list[list[str]]:
+        ...
+
+    @abstractmethod
+    def encode_to_vsa(self) -> np.ndarray:
+        ...
+
+
+class BaseLogicEngine(ABC):
+    """Abstract base for dual-mode logic evaluation."""
+
+    @abstractmethod
+    def evaluate(
+        self,
+        formula_str: str,
+        facts: dict[str, bool | float],
+        mode: str | None = None,
+    ) -> bool | float:
+        ...
+
+    @abstractmethod
+    def check_obligation(
+        self,
+        conditions: list[str],
+        facts: dict[str, bool],
+        exceptions: list[str] | None = None,
+    ) -> bool:
+        ...
