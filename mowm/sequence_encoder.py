@@ -39,7 +39,12 @@ class SequenceEncoder:
     """
 
     def __init__(
-        self, k: int = 80, l: int = 128, seed: int = 0, latent_dim: int | None = None  # noqa: E741
+        self,
+        k: int = 80,
+        l: int = 128,  # noqa: E741
+        seed: int = 0,
+        latent_dim: int | None = None,
+        projection_matrix: np.ndarray | None = None,
     ) -> None:
         self._bc = BlockCodes(k=k, l=l)
         self._k = k
@@ -57,9 +62,13 @@ class SequenceEncoder:
         self._pos_cache: dict[int, np.ndarray] = {}
 
         # Orthogonal projection matrix P: shape (k*l, latent_dim).
-        # Built via QR decomposition so columns are orthonormal.
+        # Option 1: Load precomputed P (fast — no QR needed)
+        # Option 2: Compute via QR decomposition (slow for large dims)
         self._P: np.ndarray | None = None
-        if latent_dim is not None:
+        if projection_matrix is not None:
+            self._P = projection_matrix.astype(np.float32)
+            self._latent_dim = projection_matrix.shape[1]
+        elif latent_dim is not None:
             rng = np.random.default_rng(seed)
             Q, _ = np.linalg.qr(rng.standard_normal((k * l, latent_dim)))
             self._P = Q.astype(np.float32)
@@ -250,3 +259,44 @@ class SequenceEncoder:
             bound_vecs.append(self._bc.bind(emb_vec, pos_vec))
 
         return self._bc.bundle(bound_vecs).astype(np.float32)
+
+    def save_projection(self, path: str) -> None:
+        """Save the projection matrix P to a .npy file.
+
+        Args:
+            path: File path (e.g. 'projection_80x128_4096.npy').
+        """
+        if self._P is None:
+            raise RuntimeError("No projection matrix to save.")
+        np.save(path, self._P)
+
+    @classmethod
+    def from_codebook(
+        cls,
+        codebook_path: str,
+        k: int = 80,
+        l: int = 128,  # noqa: E741
+        seed: int = 0,
+    ) -> "SequenceEncoder":
+        """Create a SequenceEncoder from a saved NV-Embed codebook .npz.
+
+        Loads the precomputed projection matrix P if present, otherwise
+        computes it from the latent_dim in the codebook.
+
+        Args:
+            codebook_path: Path to .npz codebook file.
+            k: Number of blocks.
+            l: Block length.
+            seed: Random seed.
+
+        Returns:
+            SequenceEncoder with projection matrix loaded.
+        """
+        cb = np.load(codebook_path, allow_pickle=True)
+        latent_dim = int(cb["latent_dim"])
+
+        if "projection_matrix" in cb:
+            P = cb["projection_matrix"]
+            return cls(k=k, l=l, seed=seed, projection_matrix=P)
+
+        return cls(k=k, l=l, seed=seed, latent_dim=latent_dim)
