@@ -540,7 +540,10 @@ Tests use k=4, l=32 as before.
 - **Google Research `hypertransformer/`** — layerwise weight generation
 - **aura-snn-rag `hippocampal.py`** — place/grid/time cells, episodic memory
 - **E:\RAW_TEXTS\realms** — 5,998 training files across 35 domains
-- **D:\google-research\** — (findings pending, will amend if relevant)
+- **Google Research `muzero/`** — latent world model with LSTM transitions (reference for state prediction)
+- **Google Research `cvl_public/`** — THE CVL implementation (agents, networks, learning)
+- **Google Research `sparse_mixers/routing.py`** — DiversityMetrics (aux_loss, z_loss, expert_usage)
+- **Google Research `symbolic_functionals/syfes/`** — regularized evolution of symbolic expressions
 
 ## Key Design Decisions
 
