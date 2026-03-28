@@ -2,8 +2,6 @@
 """Tests for LogicEngine — dual-mode deductive/probabilistic logic evaluation."""
 from __future__ import annotations
 
-import pytest
-
 from mowm.logic_engine import LogicEngine, LogicMode
 
 
