@@ -59,6 +59,9 @@ _DOMAIN_SYNONYMS: dict[str, set[str]] = {
         "disease", "virus", "bacteria", "immune", "vaccine",
         "inherit", "offspring", "breed", "species", "extinct",
         "food", "nutrient", "digest", "metabolism",
+        "dna", "gene", "genetic", "genome", "encode", "protein",
+        "rna", "chromosome", "allele", "heredity", "trait",
+        "natural", "evolution", "mutation", "darwin",
     },
     "historical": {
         "century", "decade", "year", "ancient", "modern", "medieval",
@@ -163,13 +166,49 @@ class ExpertBidClassifier:
                 if len(t) <= 5 and t[0].islower()
             )
 
-        # Add concept synonyms to name tokens (these are weighted 3x)
+        # Add concept synonyms from manual list (fallback)
         for domain, synonyms in _DOMAIN_SYNONYMS.items():
             name_tokens = self._domain_name_tokens.setdefault(domain, set())
             name_tokens.update(synonyms)
             all_tokens = self._domain_tokens.setdefault(domain, set())
             all_tokens.update(synonyms)
 
+        # Add corpus-mined vocabulary if available (overrides manual)
+        self._load_corpus_vocab()
+
+        # Build VSA centroids
+        self._build_centroids()
+
+    def _load_corpus_vocab(self) -> None:
+        """Load corpus-mined vocabulary from mowm_corpus_vocab.npz if it exists."""
+        import os
+        for path in [
+            "mowm_corpus_vocab.npz",
+            os.path.join(
+                os.path.dirname(__file__), "..", "..",
+                "mowm_corpus_vocab.npz",
+            ),
+        ]:
+            if os.path.exists(path):
+                try:
+                    from mowm.qa.corpus_indexer import CorpusIndexer
+                    idx = CorpusIndexer.load(path)
+                    for domain in idx.domains:
+                        top = idx.top_words(domain, n=50)
+                        name_tokens = self._domain_name_tokens.setdefault(
+                            domain, set(),
+                        )
+                        name_tokens.update(top)
+                        all_tokens = self._domain_tokens.setdefault(
+                            domain, set(),
+                        )
+                        all_tokens.update(top)
+                    return
+                except Exception:
+                    pass
+
+    def _build_centroids(self) -> None:
+        """Build VSA centroids from axiom vectors."""
         # Compute centroids
         for domain, axioms in self._domain_index.items():
             vecs = np.stack([a.vector for a in axioms], axis=0)
@@ -265,12 +304,12 @@ class ExpertBidClassifier:
                 best_axiom_score = overlap
                 best_axiom = ax.name
 
-        # Weighted combination
+        # Weighted combination — keywords and variables are primary
         score = (
-            0.35 * kw_score
-            + 0.25 * vsa_sim
-            + 0.20 * formula_coverage
-            + 0.20 * var_score
+            0.45 * kw_score
+            + 0.20 * vsa_sim
+            + 0.10 * formula_coverage
+            + 0.25 * var_score
         )
 
         return ExpertBid(
