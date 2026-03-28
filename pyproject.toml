@@ -1,0 +1,31 @@
+[project]
+name = "mowm"
+version = "0.1.0"
+description = "General-Purpose Mixture of World Models — self-organizing recursive expert worlds with living axiom library"
+license = {text = "BSL-1.1"}
+requires-python = ">=3.12"
+dependencies = [
+    "cubemind>=2.0.0",
+    "grilly>=0.5.3",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.4"]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["mowm*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.uv.sources]
+cubemind = { path = "../cubemind", editable = true }
+grilly = { path = "../grilly", editable = true }
+
+[tool.ruff]
+line-length = 100
