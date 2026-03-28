@@ -131,24 +131,68 @@ class DirectSolver:
     # COMPUTE
     # ------------------------------------------------------------------
 
-    def _find_axiom_for_target(self, target: str, domain: str):
-        """Return the best axiom whose formula contains *target* as a variable."""
-        candidates = [
-            ax for ax in self._lib.all_axioms()
-            if ax.domain.split(".")[0] == domain and target in ax.formula_str
-        ]
-        if not candidates:
-            # Fallback: search all domains
-            candidates = [
-                ax for ax in self._lib.all_axioms()
-                if target in ax.formula_str
-            ]
-        return candidates[0] if candidates else None
+    def _find_axiom_for_target(
+        self, target: str, domain: str, variables: dict[str, float] | None = None,
+    ):
+        """Return the best axiom whose formula has *target* as its LHS variable.
+
+        Priority: exact LHS match in domain (scored by variable overlap)
+        > LHS match any domain > whole-word match > substring fallback.
+        """
+        import re
+
+        all_axioms = self._lib.all_axioms()
+        var_names = set(variables.keys()) if variables else set()
+
+        def _var_overlap(formula: str) -> int:
+            """Count how many provided variables appear in the formula."""
+            if not var_names:
+                return 0
+            words = set(re.findall(r"[a-zA-Z_]\w*", formula))
+            return len(var_names & words)
+
+        # Pass 1: exact LHS match in matching domain
+        lhs_matches = []
+        for ax in all_axioms:
+            if ax.domain.split(".")[0] != domain:
+                continue
+            lhs = ax.formula_str.split("=", 1)[0].strip() if "=" in ax.formula_str else ""
+            if lhs == target:
+                lhs_matches.append(ax)
+        if len(lhs_matches) == 1:
+            return lhs_matches[0]
+        if len(lhs_matches) > 1:
+            # Prefer axiom where most provided variables appear in formula
+            lhs_matches.sort(key=lambda a: _var_overlap(a.formula_str), reverse=True)
+            return lhs_matches[0]
+
+        # Pass 2: exact LHS match, any domain (scored by overlap)
+        lhs_any = []
+        for ax in all_axioms:
+            lhs = ax.formula_str.split("=", 1)[0].strip() if "=" in ax.formula_str else ""
+            if lhs == target:
+                lhs_any.append(ax)
+        if lhs_any:
+            lhs_any.sort(key=lambda a: _var_overlap(a.formula_str), reverse=True)
+            return lhs_any[0]
+
+        # Pass 3: target appears as whole word in formula, same domain
+        word_pat = re.compile(rf"\b{re.escape(target)}\b")
+        for ax in all_axioms:
+            if ax.domain.split(".")[0] == domain and word_pat.search(ax.formula_str):
+                return ax
+
+        # Pass 4: substring fallback
+        for ax in all_axioms:
+            if ax.domain.split(".")[0] == domain and target in ax.formula_str:
+                return ax
+
+        return None
 
     def _can_solve_compute(self, parsed: "ParsedQuestion", domain: str) -> bool:
         if parsed.target is None:
             return False
-        axiom = self._find_axiom_for_target(parsed.target, domain)
+        axiom = self._find_axiom_for_target(parsed.target, domain, parsed.variables)
         return axiom is not None
 
     def _solve_compute(self, parsed: "ParsedQuestion", domain: str) -> QAResponse:
@@ -163,7 +207,7 @@ class DirectSolver:
                 reasoning_trace=["No target variable found in question."],
             )
 
-        axiom = self._find_axiom_for_target(parsed.target, domain)
+        axiom = self._find_axiom_for_target(parsed.target, domain, parsed.variables)
         if axiom is None:
             return QAResponse(
                 answer=f"No axiom found for target variable '{parsed.target}'.",
