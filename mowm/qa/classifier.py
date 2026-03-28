@@ -42,7 +42,7 @@ _CONCEPT_DOMAIN: dict[str, str] = {
     "thermodynamics": "physics", "entropy": "physics", "carnot": "physics",
     "temperature": "physics", "heat": "physics",
     # Atomic / Quantum
-    "quantum": "atomic", "superposition": "atomic", "entanglement": "atomic",
+    "quantum": "atomic", "entanglement": "atomic",
     "schrodinger": "atomic", "heisenberg": "atomic", "uncertainty": "atomic",
     "electron": "atomic", "photon": "atomic", "atom": "atomic",
     "nucleus": "atomic", "orbital": "atomic", "spin": "atomic",

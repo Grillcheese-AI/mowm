@@ -113,8 +113,8 @@ class AugmentedSolver:
                 for tok in _re.findall(r"[A-Za-z_]\w*", axiom.name + " " + axiom.formula_str)
             }
             overlap = len(question_keywords & axiom_tokens)
-            # Slight domain bonus
-            domain_bonus = 0.5 if axiom.domain.split(".")[0] == domain else 0.0
+            # Strong domain bonus — prefer axioms from the classified domain
+            domain_bonus = 3.0 if axiom.domain.split(".")[0] == domain else 0.0
             score = float(overlap) + domain_bonus
             scored.append((score, axiom))
 
