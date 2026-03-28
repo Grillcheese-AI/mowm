@@ -434,6 +434,52 @@ if response.confidence > 0.3:
 return augmented_solver.solve(parsed, domain)
 ```
 
+## Edge Ontology (Semantic Graph Layer)
+
+The axiom graph becomes a **Labeled Property Graph** where edges carry
+semantic type, weight, and metadata. This is what makes the system
+reason like an LLM — it knows *how* concepts relate, not just that
+they share a variable.
+
+```python
+class EdgeType(Enum):
+    # Causal (powers CausalTracer)
+    INCREASES = "INCREASES"
+    DECREASES = "DECREASES"
+    CAUSES = "CAUSES"
+
+    # Hierarchical (powers GENERAL intent)
+    IS_A = "IS_A"                   # Friction IS_A Force
+    PART_OF = "PART_OF"             # Entropy PART_OF Thermodynamics
+    SPECIAL_CASE_OF = "SPECIAL_CASE_OF"  # Weight SPECIAL_CASE_OF Gravity
+
+    # Mathematical (powers COMPARE + ChainBuilder)
+    PROPORTIONAL_TO = "PROPORTIONAL_TO"
+    INVERSELY_PROPORTIONAL = "INVERSELY_PROPORTIONAL"
+    DERIVATIVE_OF = "DERIVATIVE_OF"  # Force DERIVATIVE_OF Momentum
+    INTEGRAL_OF = "INTEGRAL_OF"
+    SHARES_VARIABLE = "SHARES_VARIABLE"  # Baseline v0.3.0 link
+
+    # Latent / Associative (the "LLM intuition")
+    SIMILAR_TO_VEC = "SIMILAR_TO_VEC"  # Dynamic VSA cosine sim edges
+
+@dataclass
+class SemanticEdge:
+    source_id: str
+    target_id: str
+    edge_type: EdgeType
+    weight: float = 1.0      # 1.0 for hard math, <1.0 for VSA latent
+    metadata: dict = field(default_factory=dict)
+```
+
+KnowledgeContext gains `edges` and `adjacency_list` fields, making it
+an extracted semantic subgraph rather than just a list of axioms.
+
+The CausalTracer uses **EffectSign arithmetic** to detect cancellations:
+multiply signs along each path (POSITIVE * NEGATIVE = NEGATIVE). If
+both positive and negative paths exist to the same target, the variable
+cancels — the key to answering "why" questions deterministically.
+
 ## Key Design Decisions
 
 1. **Not a language model.** The composer uses hierarchical templates
