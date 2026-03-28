@@ -263,10 +263,25 @@ class AugmentedSolver:
         answer = "\n".join(lines)
         trace = ["Used template fallback (no LLM endpoint configured or httpx unavailable)."]
 
+        # Dynamic confidence based on match quality
+        n_axioms = len(context["axioms"])
+        n_computed = len(context["computed_values"])
+        # Check if axioms are from the right domain
+        in_domain = sum(
+            1 for ax in context["axioms"]
+            if ax.get("domain", "").split(".")[0] == domain
+        )
+
+        confidence = 0.30  # base
+        confidence += min(0.20, n_axioms * 0.05)  # more axioms = more confident
+        confidence += min(0.15, n_computed * 0.10)  # computed values = stronger
+        confidence += min(0.15, in_domain * 0.05)   # in-domain axioms = better match
+        confidence = min(0.85, confidence)  # cap below direct solver
+
         return QAResponse(
             answer=answer,
             mode="TEMPLATE",
-            confidence=0.4,
+            confidence=round(confidence, 2),
             domain=domain,
             evidence=[ax["name"] for ax in context["axioms"]],
             computed_values=context["computed_values"],

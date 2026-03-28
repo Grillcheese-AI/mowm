@@ -71,10 +71,11 @@ class TestTemplateFallback:
         resp = solver.solve(pq, "physics")
         assert resp.mode == "TEMPLATE"
 
-    def test_template_confidence_is_low(self, solver, parser):
+    def test_template_confidence_scales_with_match(self, solver, parser):
         pq = parser.parse("Explain Newton's Second Law")
         resp = solver.solve(pq, "physics")
-        assert 0.0 < resp.confidence <= 0.5
+        # Confidence should be positive and below direct solver level
+        assert 0.0 < resp.confidence < 0.90
 
     def test_template_answer_contains_domain(self, solver, parser):
         pq = parser.parse("Explain Newton's Second Law")
