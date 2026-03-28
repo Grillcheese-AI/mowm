@@ -47,6 +47,36 @@ _AXIOMS: list[tuple[str, str, str, list[str]]] = [
         ["/", "-"],
     ),
     (
+        "Quantum Superposition",
+        "atomic.qm",
+        "|psi> = alpha*|0> + beta*|1>; |alpha|^2 + |beta|^2 = 1",
+        ["+", "*"],
+    ),
+    (
+        "Wave Function Collapse",
+        "atomic.qm",
+        "measurement of |psi> = alpha*|0> + beta*|1> yields |0> with P=|alpha|^2",
+        ["*"],
+    ),
+    (
+        "Quantum Entanglement",
+        "atomic.qm",
+        "|psi_AB> != |psi_A> tensor |psi_B> for entangled states",
+        ["*"],
+    ),
+    (
+        "De Broglie Wavelength",
+        "atomic.qm",
+        "lambda = h / p = h / (m * v)",
+        ["/", "*"],
+    ),
+    (
+        "Fermi-Dirac Distribution",
+        "atomic.qm",
+        "f(E) = 1 / (exp((E - mu) / (k_B * T)) + 1)",
+        ["/", "exp", "+", "*", "-"],
+    ),
+    (
         "Lennard-Jones Potential",
         "atomic.md",
         "V(r) = 4*epsilon*((sigma/r)^12 - (sigma/r)^6)",

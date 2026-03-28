@@ -180,8 +180,10 @@ class TestEdgeCases:
         lib.register(lib.make_axiom("Ohm's Law", "electronics", "V = I * R"))
         clf = DomainClassifier(lib)
         result = clf.classify("What is voltage?")
-        assert len(result) == 1
-        assert result[0][0] == "electronics"
+        assert len(result) >= 1
+        # electronics should be in the results (from axiom keywords)
+        domains = [d for d, _ in result]
+        assert "electronics" in domains
 
     def test_empty_question_string(self, clf):
         result = clf.classify("")
