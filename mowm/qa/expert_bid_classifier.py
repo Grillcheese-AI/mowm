@@ -27,6 +27,25 @@ if TYPE_CHECKING:
 _TOKEN_RE = re.compile(r"[A-Za-z_]\w*")
 _VAR_RE = re.compile(r"\b([a-zA-Z_]\w*)\s*=\s*[-\d]")
 
+# Stopwords to ignore in keyword matching
+_STOPWORDS = frozenset({
+    "a", "an", "the", "is", "are", "was", "were", "be", "been",
+    "being", "have", "has", "had", "do", "does", "did", "will",
+    "would", "could", "should", "may", "might", "shall", "can",
+    "to", "of", "in", "for", "on", "with", "at", "by", "from",
+    "as", "into", "through", "during", "before", "after", "and",
+    "but", "or", "nor", "not", "so", "yet", "both", "either",
+    "neither", "each", "every", "all", "any", "few", "more",
+    "most", "other", "some", "such", "no", "only", "own", "same",
+    "than", "too", "very", "just", "because", "if", "when", "what",
+    "which", "who", "whom", "this", "that", "these", "those", "it",
+    "its", "how", "why", "where", "there", "here", "up", "about",
+    "then", "them", "they", "he", "she", "we", "you", "me", "him",
+    "her", "us", "my", "your", "his", "our", "their", "tell",
+    "explain", "describe", "define", "show", "find", "calculate",
+    "compute", "compare", "what", "give", "know", "think",
+})
+
 
 @dataclass
 class ExpertBid:
@@ -60,15 +79,26 @@ class ExpertBidClassifier:
 
     def _build_index(self) -> None:
         """Index axioms by domain for fast bidding."""
+        self._domain_name_tokens: dict[str, set[str]] = {}
+
         for axiom in self._lib.all_axioms():
             top = axiom.domain.split(".")[0]
             self._domain_index.setdefault(top, []).append(axiom)
 
+            # All tokens (name + formula)
             tokens = self._domain_tokens.setdefault(top, set())
-            tokens.update(
+            all_toks = {
                 t.lower() for t in _TOKEN_RE.findall(
                     axiom.name + " " + axiom.formula_str,
-                )
+                ) if t.lower() not in _STOPWORDS and len(t) > 1
+            }
+            tokens.update(all_toks)
+
+            # Name-only tokens (higher value — these are the concept names)
+            name_tokens = self._domain_name_tokens.setdefault(top, set())
+            name_tokens.update(
+                t.lower() for t in _TOKEN_RE.findall(axiom.name)
+                if t.lower() not in _STOPWORDS and len(t) > 1
             )
 
             variables = self._domain_variables.setdefault(top, set())
@@ -98,7 +128,10 @@ class ExpertBidClassifier:
         if not self._domain_index:
             return []
 
-        q_tokens = {t.lower() for t in _TOKEN_RE.findall(question)}
+        q_tokens = {
+            t.lower() for t in _TOKEN_RE.findall(question)
+            if t.lower() not in _STOPWORDS and len(t) > 1
+        }
 
         # Extract variable names from question (e.g., m=10 -> "m")
         q_vars = {m.group(1) for m in _VAR_RE.finditer(question)}
@@ -128,9 +161,13 @@ class ExpertBidClassifier:
         domain_tokens = self._domain_tokens.get(domain, set())
         domain_vars = self._domain_variables.get(domain, set())
 
-        # Factor 1: Keyword overlap (normalized by question length)
-        keyword_hits = len(q_tokens & domain_tokens)
-        kw_score = keyword_hits / max(len(q_tokens), 1)
+        # Factor 1: Keyword overlap — name matches worth 3x formula matches
+        name_tokens = self._domain_name_tokens.get(domain, set())
+        name_hits = len(q_tokens & name_tokens)
+        formula_only_hits = len(q_tokens & (domain_tokens - name_tokens))
+        keyword_hits = name_hits + formula_only_hits
+        weighted_hits = name_hits * 3.0 + formula_only_hits * 1.0
+        kw_score = weighted_hits / max(len(q_tokens) * 3.0, 1)
 
         # Factor 2: VSA centroid similarity
         centroid = self._domain_centroids.get(domain)
