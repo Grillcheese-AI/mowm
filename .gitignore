@@ -8,3 +8,5 @@ build/
 *.so
 .superpowers/
 .ruff_cache/
+to_read/QUIDS/
+/to_read
