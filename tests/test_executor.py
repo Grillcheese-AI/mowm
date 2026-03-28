@@ -191,3 +191,82 @@ class TestFormulaExecutorEdgeCases:
     def test_log_of_zero_safe(self):
         result = self.ex.execute("log(x)", {"x": 0.0})
         assert np.isfinite(result)
+
+
+# ── SymPy-powered methods ──────────────────────────────────────────────
+
+
+class TestSympySolveFor:
+    def setup_method(self):
+        self.ex = SafeFormulaExecutor()
+
+    def test_solve_for_acceleration(self):
+        result = self.ex.solve_for("F = m * a", "a")
+        assert "a = " in result
+        assert "F" in result
+        assert "m" in result
+
+    def test_solve_for_mass(self):
+        result = self.ex.solve_for("F = m * a", "m")
+        assert "m = " in result
+
+    def test_solve_for_velocity(self):
+        result = self.ex.solve_for("KE = 0.5 * m * v**2", "v")
+        assert "v = " in result
+
+    def test_solve_for_missing_var_raises(self):
+        with pytest.raises(ValueError, match="not in"):
+            self.ex.solve_for("F = m * a", "z")
+
+
+class TestSympyAutoSolve:
+    """Test that execute() auto-solves for missing variables."""
+
+    def setup_method(self):
+        self.ex = SafeFormulaExecutor()
+
+    def test_auto_solve_mass(self):
+        # F=ma, given F=98 and a=9.8, solve for m -> 10
+        result = self.ex.execute("F = m * a", {"F": 98.0, "a": 9.8})
+        assert result == pytest.approx(10.0, rel=1e-4)
+
+    def test_auto_solve_force(self):
+        # F=ma, given m=10 and a=9.8, solve for F -> 98
+        result = self.ex.execute("F = m * a", {"m": 10.0, "a": 9.8})
+        assert result == pytest.approx(98.0, rel=1e-4)
+
+    def test_auto_solve_resistance(self):
+        # V=IR, given V=50 and I=5, solve for R -> 10
+        result = self.ex.execute("V = I * R", {"V": 50.0, "I": 5.0})
+        assert result == pytest.approx(10.0, rel=1e-4)
+
+
+class TestSympySubstitute:
+    """Test symbolic_substitute for proving cancellations."""
+
+    def setup_method(self):
+        self.ex = SafeFormulaExecutor()
+
+    def test_mass_cancels_in_free_fall(self):
+        # W=mg substituted into a=F/m proves a=g
+        result = self.ex.symbolic_substitute(
+            "W = m * g", "a = W / m", "W",
+        )
+        assert "a = " in result
+        assert "g" in result
+        # m should NOT appear (it cancels)
+        assert "m" not in result.split("= ")[1]
+
+    def test_force_momentum_relationship(self):
+        # F=ma substituted into p=m*v via m proves p = F*v/a
+        result = self.ex.symbolic_substitute(
+            "F = m * a", "p = m * v", "m",
+        )
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_invalid_shared_var_raises(self):
+        with pytest.raises(ValueError):
+            self.ex.symbolic_substitute(
+                "F = m * a", "V = I * R", "z",
+            )

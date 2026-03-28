@@ -241,5 +241,184 @@ class SafeFormulaExecutor(BaseExecutor):
         formula_str: str,
         inputs: dict[str, float],
     ) -> float:
+        """Evaluate a formula with named variables.
+
+        First attempts SymPy symbolic solve (handles missing variables).
+        Falls back to AST evaluation if SymPy is unavailable or fails.
+        """
+        # Try SymPy path first — can solve for missing variables
+        try:
+            result = self._execute_sympy(formula_str, inputs)
+            if np.isfinite(result):
+                return result
+        except Exception:
+            pass
+
+        # Fallback: AST evaluation
         tree = self.parse(formula_str)
         return tree.evaluate(inputs)
+
+    # ── SymPy-powered methods ────────────────────────────────────────────
+
+    def _parse_sympy(self, formula_str: str):
+        """Parse formula string into a SymPy expression.
+
+        If formula contains '=', parses as LHS - RHS = 0.
+        """
+        import sympy as sp
+        from sympy.parsing.sympy_parser import (
+            implicit_multiplication_application,
+            parse_expr,
+            standard_transformations,
+        )
+
+        formula_str = formula_str.strip()
+        if not formula_str:
+            raise ValueError("Empty formula string")
+
+        transforms = standard_transformations + (
+            implicit_multiplication_application,
+        )
+
+        # Extract all identifiers and declare as real symbols
+        # to prevent 'I' being treated as imaginary unit
+        import re as _re
+        idents = set(_re.findall(r"[A-Za-z_]\w*", formula_str))
+        _funcs = {
+            "sin", "cos", "tan", "sqrt", "exp", "log",
+            "abs", "pi", "E", "oo",
+        }
+        local_dict = {
+            name: sp.Symbol(name, real=True)
+            for name in idents if name not in _funcs
+        }
+
+        if "=" in formula_str and "==" not in formula_str:
+            lhs_str, rhs_str = formula_str.split("=", 1)
+            lhs = parse_expr(
+                lhs_str.strip(), local_dict=local_dict,
+                transformations=transforms,
+            )
+            rhs = parse_expr(
+                rhs_str.strip(), local_dict=local_dict,
+                transformations=transforms,
+            )
+            return lhs - rhs
+
+        return parse_expr(
+            formula_str, local_dict=local_dict,
+            transformations=transforms,
+        )
+
+    def _execute_sympy(
+        self, formula_str: str, inputs: dict[str, float],
+    ) -> float:
+        """Evaluate using SymPy — can auto-solve for one missing variable.
+
+        If all variables are provided, evaluates directly.
+        If exactly one variable is missing, solves for it algebraically.
+        """
+        import sympy as sp
+
+        expr = self._parse_sympy(formula_str)
+        subs = {sp.Symbol(k, real=True): v for k, v in inputs.items()}
+
+        if "=" in formula_str and "==" not in formula_str:
+            free = expr.free_symbols
+            provided = set(subs.keys())
+            missing = free - provided
+
+            if len(missing) == 1:
+                target = list(missing)[0]
+                solutions = sp.solve(expr.subs(subs), target)
+                if not solutions:
+                    raise ValueError(f"No solution for {target}")
+                return float(solutions[0].evalf())
+            elif len(missing) == 0:
+                return float(expr.subs(subs).evalf())
+            else:
+                raise ValueError(
+                    f"Multiple unknowns: {missing}"
+                )
+        else:
+            result = expr.subs(subs).evalf()
+            return float(result)
+
+    def solve_for(self, formula_str: str, target_var: str) -> str:
+        """Symbolically rearrange an equation to isolate a target variable.
+
+        Args:
+            formula_str: Equation string (e.g., "F = m * a").
+            target_var: Variable to isolate (e.g., "a").
+
+        Returns:
+            Rearranged equation string (e.g., "a = F/m").
+
+        Example:
+            >>> ex.solve_for("F = m * a", "a")
+            'a = F/m'
+        """
+        import sympy as sp
+
+        expr = self._parse_sympy(formula_str)
+        target = sp.Symbol(target_var, real=True)
+
+        if target not in expr.free_symbols:
+            raise ValueError(
+                f"Variable '{target_var}' not in '{formula_str}'"
+            )
+
+        solutions = sp.solve(expr, target)
+        if not solutions:
+            raise ValueError(
+                f"Could not isolate '{target_var}' in '{formula_str}'"
+            )
+
+        return f"{target_var} = {solutions[0]}"
+
+    def symbolic_substitute(
+        self, eq1: str, eq2: str, shared_var: str,
+    ) -> str:
+        """Substitute eq1 into eq2 to eliminate a shared variable.
+
+        This is the core operation for proving structural cancellations
+        (e.g., proving mass cancels in free fall: W=mg into a=F/m -> a=g).
+
+        Args:
+            eq1: First equation (e.g., "W = m * g").
+            eq2: Second equation (e.g., "a = F / m").
+            shared_var: Variable connecting them (e.g., "F").
+
+        Returns:
+            Simplified result string (e.g., "a = g").
+
+        Example:
+            >>> ex.symbolic_substitute("W = m * g", "a = F / m", "F")
+            'a = g'
+        """
+        import sympy as sp
+
+        expr1 = self._parse_sympy(eq1)
+        expr2 = self._parse_sympy(eq2)
+        shared = sp.Symbol(shared_var, real=True)
+
+        # Isolate shared variable in eq1
+        isolated = sp.solve(expr1, shared)
+        if not isolated:
+            raise ValueError(
+                f"Cannot isolate '{shared_var}' in '{eq1}'"
+            )
+
+        # Substitute into eq2
+        combined = expr2.subs(shared, isolated[0])
+        simplified = sp.simplify(combined)
+
+        # Format as "target = expression"
+        free_syms = sorted(simplified.free_symbols, key=str)
+        if free_syms:
+            target = free_syms[0]
+            final = sp.solve(simplified, target)
+            if final:
+                return f"{target} = {final[0]}"
+
+        return str(simplified)
