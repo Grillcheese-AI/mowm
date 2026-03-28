@@ -70,3 +70,82 @@ class TestTokenEncoding:
         e1 = SequenceEncoder(k=K, l=L, seed=42)
         e2 = SequenceEncoder(k=K, l=L, seed=42)
         np.testing.assert_array_equal(e1.encode_tokens(["a", "b", "c"]), e2.encode_tokens(["a", "b", "c"]))
+
+
+LATENT_DIM = 16
+
+
+class TestOrthogonalProjection:
+    def setup_method(self):
+        self.enc = SequenceEncoder(k=K, l=L, seed=0, latent_dim=LATENT_DIM)
+        self.rng = np.random.default_rng(99)
+
+    def _rand_emb(self) -> np.ndarray:
+        return self.rng.standard_normal(LATENT_DIM).astype(np.float32)
+
+    def test_projection_matrix_set(self):
+        assert self.enc._P is not None
+
+    def test_projection_matrix_shape(self):
+        assert self.enc._P.shape == (K * L, LATENT_DIM)
+
+    def test_projection_matrix_dtype(self):
+        assert self.enc._P.dtype == np.float32
+
+    def test_project_embedding_shape(self):
+        out = self.enc._project_embedding(self._rand_emb())
+        assert out.shape == (K, L)
+
+    def test_project_embedding_dtype(self):
+        out = self.enc._project_embedding(self._rand_emb())
+        assert out.dtype == np.float32
+
+    def test_project_embedding_deterministic(self):
+        emb = self._rand_emb()
+        out1 = self.enc._project_embedding(emb)
+        out2 = self.enc._project_embedding(emb)
+        np.testing.assert_array_equal(out1, out2)
+
+    def test_project_embedding_raises_without_latent_dim(self):
+        enc_no_proj = SequenceEncoder(k=K, l=L, seed=0)
+        with __import__("pytest").raises(RuntimeError):
+            enc_no_proj._project_embedding(self._rand_emb())
+
+    def test_encode_embedded_tokens_shape(self):
+        embs = [self._rand_emb() for _ in range(4)]
+        out = self.enc.encode_embedded_tokens(embs)
+        assert out.shape == (K, L)
+
+    def test_encode_embedded_tokens_dtype(self):
+        embs = [self._rand_emb() for _ in range(3)]
+        out = self.enc.encode_embedded_tokens(embs)
+        assert out.dtype == np.float32
+
+    def test_encode_embedded_tokens_empty(self):
+        out = self.enc.encode_embedded_tokens([])
+        assert out.shape == (K, L)
+        assert np.all(out == 0.0)
+
+    def test_encode_embedded_tokens_nonzero(self):
+        embs = [self._rand_emb() for _ in range(2)]
+        out = self.enc.encode_embedded_tokens(embs)
+        assert np.any(out != 0.0)
+
+    def test_encode_embedded_tokens_order_matters(self):
+        emb_a = self._rand_emb()
+        emb_b = self._rand_emb()
+        out1 = self.enc.encode_embedded_tokens([emb_a, emb_b])
+        out2 = self.enc.encode_embedded_tokens([emb_b, emb_a])
+        # Different orderings should produce different VSA vectors
+        from cubemind.ops.block_codes import BlockCodes
+        sim = BlockCodes(k=K, l=L).similarity(out1, out2)
+        assert sim < 0.99
+
+    def test_orthogonal_projection_no_latent_dim_has_no_P(self):
+        enc = SequenceEncoder(k=K, l=L, seed=0)
+        assert enc._P is None
+
+    def test_projection_seed_reproducible(self):
+        enc1 = SequenceEncoder(k=K, l=L, seed=7, latent_dim=LATENT_DIM)
+        enc2 = SequenceEncoder(k=K, l=L, seed=7, latent_dim=LATENT_DIM)
+        np.testing.assert_array_equal(enc1._P, enc2._P)

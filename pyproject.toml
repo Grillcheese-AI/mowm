@@ -1,6 +1,6 @@
 [project]
 name = "mowm"
-version = "0.1.0"
+version = "0.2.0"
 description = "General-Purpose Mixture of World Models — self-organizing recursive expert worlds with living axiom library"
 license = {text = "BSL-1.1"}
 requires-python = ">=3.12"

@@ -23,17 +23,29 @@ class SequenceEncoder:
     - Temporal: time-sorted events with exponential recency weighting
     - Token: positional binding for ordered token sequences
 
+    Optionally accepts pre-trained embeddings via an orthogonal projection
+    matrix (computed by QR decomposition) that maps *latent_dim*-dimensional
+    embedding vectors into the ``(k, l)`` block-code VSA space while
+    approximately preserving cosine similarity.
+
     Args:
         k: Number of blocks per VSA vector.
         l: Block length (number of elements per block).  # noqa: E741
-        seed: RNG seed for reproducible nucleotide and position vectors.
+        seed: RNG seed for reproducible nucleotide, position, and projection.
+        latent_dim: Dimensionality of external embeddings (e.g. LLM hidden size).
+            If *None*, the projection matrix is not computed and
+            :meth:`_project_embedding` / :meth:`encode_embedded_tokens` will
+            raise :exc:`RuntimeError`.
     """
 
-    def __init__(self, k: int = 80, l: int = 128, seed: int = 0) -> None:  # noqa: E741
+    def __init__(
+        self, k: int = 80, l: int = 128, seed: int = 0, latent_dim: int | None = None  # noqa: E741
+    ) -> None:
         self._bc = BlockCodes(k=k, l=l)
         self._k = k
         self._l = l
         self._seed = seed
+        self._latent_dim = latent_dim
 
         # Pre-generate one random_discrete vector per nucleotide, reproducibly.
         self._nuc_vecs: dict[str, np.ndarray] = {
@@ -43,6 +55,14 @@ class SequenceEncoder:
 
         # Cache for position vectors (position index → vector).
         self._pos_cache: dict[int, np.ndarray] = {}
+
+        # Orthogonal projection matrix P: shape (k*l, latent_dim).
+        # Built via QR decomposition so columns are orthonormal.
+        self._P: np.ndarray | None = None
+        if latent_dim is not None:
+            rng = np.random.default_rng(seed)
+            Q, _ = np.linalg.qr(rng.standard_normal((k * l, latent_dim)))
+            self._P = Q.astype(np.float32)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -173,5 +193,60 @@ class SequenceEncoder:
             tok_vec = self._str_vec(token)
             pos_vec = self._pos_vec(pos)
             bound_vecs.append(self._bc.bind(tok_vec, pos_vec))
+
+        return self._bc.bundle(bound_vecs).astype(np.float32)
+
+    def _project_embedding(self, embedding: np.ndarray) -> np.ndarray:
+        """Project a *latent_dim*-dimensional embedding into the VSA space.
+
+        Applies the pre-computed orthogonal projection matrix ``P`` (shape
+        ``(k*l, latent_dim)``) to *embedding*, then reshapes the result to
+        ``(k, l)``.  The matrix is constructed via QR decomposition so
+        columns are orthonormal; this approximately preserves cosine
+        similarity between embeddings.
+
+        Args:
+            embedding: 1-D array of shape ``(latent_dim,)``, dtype float32.
+
+        Returns:
+            Block-code VSA vector of shape ``(k, l)``, dtype float32.
+
+        Raises:
+            RuntimeError: If *latent_dim* was not provided to ``__init__``.
+        """
+        if self._P is None:
+            raise RuntimeError(
+                "Orthogonal projection requires latent_dim to be set in __init__."
+            )
+        projected = self._P @ embedding.astype(np.float32)  # (k*l,)
+        return projected.reshape(self._k, self._l)
+
+    def encode_embedded_tokens(self, embeddings: list[np.ndarray]) -> np.ndarray:
+        """Encode a sequence of pre-trained embedding vectors into a VSA vector.
+
+        Each embedding is projected into the ``(k, l)`` VSA space via
+        :meth:`_project_embedding`, then bound with a positional vector and
+        bundled.  This allows LLM or other pre-trained embeddings to be
+        incorporated into the block-code VSA pipeline.
+
+        Args:
+            embeddings: List of 1-D arrays of shape ``(latent_dim,)``.  May
+                be empty.
+
+        Returns:
+            Block-code VSA vector of shape ``(k, l)``, dtype float32.
+            Returns a zero vector when *embeddings* is empty.
+
+        Raises:
+            RuntimeError: If *latent_dim* was not provided to ``__init__``.
+        """
+        if not embeddings:
+            return self._zero()
+
+        bound_vecs: list[np.ndarray] = []
+        for pos, emb in enumerate(embeddings):
+            emb_vec = self._project_embedding(emb)
+            pos_vec = self._pos_vec(pos)
+            bound_vecs.append(self._bc.bind(emb_vec, pos_vec))
 
         return self._bc.bundle(bound_vecs).astype(np.float32)
