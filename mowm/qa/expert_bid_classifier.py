@@ -27,6 +27,62 @@ if TYPE_CHECKING:
 _TOKEN_RE = re.compile(r"[A-Za-z_]\w*")
 _VAR_RE = re.compile(r"\b([a-zA-Z_]\w*)\s*=\s*[-\d]")
 
+# Domain concept synonyms — common natural language words that map to domains
+# These expand the axiom vocabulary with everyday terms people actually use
+_DOMAIN_SYNONYMS: dict[str, set[str]] = {
+    "physics": {
+        "fall", "falling", "drop", "dropping", "heavy", "heavier", "heaviest",
+        "light", "lighter", "weight", "speed", "fast", "slow", "motion",
+        "moving", "push", "pull", "throw", "object", "objects", "ball",
+        "projectile", "gravity", "gravitational", "accelerate", "decelerate",
+        "collision", "bounce", "slide", "roll", "spin", "rotate",
+        "heat", "cold", "hot", "warm", "cool", "freeze", "boil", "melt",
+        "electric", "magnetic", "circuit", "wire", "battery", "charge",
+        "wave", "sound", "light", "reflect", "refract", "lens",
+        "pressure", "flow", "fluid", "liquid", "gas", "air",
+        "rate", "distance", "height", "depth", "orbit",
+    },
+    "atomic": {
+        "quantum", "particle", "electron", "proton", "neutron", "photon",
+        "atom", "molecule", "nuclear", "radioactive", "decay", "isotope",
+        "wavelength", "spectrum", "energy level", "orbital",
+        "superposition", "entanglement", "tunneling", "spin",
+    },
+    "economics": {
+        "money", "bank", "trade", "buy", "sell", "invest", "debt",
+        "tax", "income", "wage", "salary", "wealth", "poverty",
+        "recession", "boom", "crash", "bubble", "growth",
+        "import", "export", "tariff", "subsidy",
+    },
+    "bio": {
+        "animal", "plant", "cell", "blood", "brain", "heart", "lung",
+        "disease", "virus", "bacteria", "immune", "vaccine",
+        "inherit", "offspring", "breed", "species", "extinct",
+        "food", "nutrient", "digest", "metabolism",
+    },
+    "historical": {
+        "century", "decade", "year", "ancient", "modern", "medieval",
+        "king", "queen", "emperor", "dynasty", "kingdom", "nation",
+        "battle", "conquest", "treaty", "independence",
+    },
+    "security": {
+        "hack", "breach", "password", "login", "access", "token",
+        "certificate", "ssl", "tls", "vpn", "proxy",
+    },
+    "music": {
+        "song", "note", "pitch", "tone", "key", "scale", "tune",
+        "instrument", "guitar", "piano", "drum", "sing", "voice",
+    },
+    "causal": {
+        "cause", "effect", "consequence", "result", "outcome",
+        "influence", "impact", "correlate", "predict",
+    },
+    "logic": {
+        "proof", "theorem", "axiom", "valid", "invalid", "premise",
+        "conclusion", "argument", "fallacy", "true", "false",
+    },
+}
+
 # Stopwords to ignore in keyword matching
 _STOPWORDS = frozenset({
     "a", "an", "the", "is", "are", "was", "were", "be", "been",
@@ -106,6 +162,13 @@ class ExpertBidClassifier:
                 t for t in _TOKEN_RE.findall(axiom.formula_str)
                 if len(t) <= 5 and t[0].islower()
             )
+
+        # Add concept synonyms to name tokens (these are weighted 3x)
+        for domain, synonyms in _DOMAIN_SYNONYMS.items():
+            name_tokens = self._domain_name_tokens.setdefault(domain, set())
+            name_tokens.update(synonyms)
+            all_tokens = self._domain_tokens.setdefault(domain, set())
+            all_tokens.update(synonyms)
 
         # Compute centroids
         for domain, axioms in self._domain_index.items():
