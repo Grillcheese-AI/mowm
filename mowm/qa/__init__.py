@@ -56,7 +56,7 @@ class QAPipeline:
         self._causal = causal
         self._fmt = ResponseFormatter()
         self._parser = QuestionParser()
-        self._classifier = DomainClassifier(library)
+        self._classifier = DomainClassifier(library, codebook_path=codebook_path)
 
         # Build a null causal graph if none provided (DirectSolver requires one)
         if self._causal is None:

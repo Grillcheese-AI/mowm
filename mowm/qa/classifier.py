@@ -21,10 +21,17 @@ if TYPE_CHECKING:
 
 _TOKEN_RE = re.compile(r"[A-Za-z_]\w*")
 
-# Weight split
+# Weight split (when NV-Embed available: 0.35 nvembed + 0.25 vsa + 0.2 kw + 0.2 concept)
+# Without NV-Embed: 0.4 vsa + 0.3 kw + 0.3 concept (same as before)
 _VSA_WEIGHT = 0.4
 _KW_WEIGHT = 0.3
 _CONCEPT_WEIGHT = 0.3
+
+# With NV-Embed codebook
+_NVEMBED_WEIGHT = 0.35
+_VSA_WEIGHT_NV = 0.25
+_KW_WEIGHT_NV = 0.20
+_CONCEPT_WEIGHT_NV = 0.20
 
 # Common concepts → domain mapping (fast semantic routing)
 _CONCEPT_DOMAIN: dict[str, str] = {
@@ -135,15 +142,41 @@ class DomainClassifier:
             self._load_codebook_centroids(codebook_path)
 
     def _load_codebook_centroids(self, path: str) -> None:
-        """Load domain centroids from NV-Embed codebook."""
+        """Load domain centroids from NV-Embed codebook and project into VSA space.
+
+        Projects the 4096D NV-Embed centroids through the orthogonal projection
+        matrix P into (k,l) block-code space. This allows full-sentence
+        contextual classification: the question encoded via WorldEncoder is
+        compared against NV-Embed-derived centroids in VSA space.
+        """
         try:
+            from mowm.sequence_encoder import SequenceEncoder
             cb = np.load(path, allow_pickle=True)
-            centroids = cb["centroids"]
+            centroids = cb["centroids"]  # (n_domains, 4096)
             names = list(cb["domain_names"])
+
+            # Store raw centroids
             for i, name in enumerate(names):
                 self._nvembed_centroids[name] = centroids[i]
-        except Exception:
-            pass
+
+            # Project centroids into VSA space if projection matrix exists
+            if "projection_matrix" in cb:
+                k = self._lib.bc.k
+                l_block = self._lib.bc.l
+                enc = SequenceEncoder(
+                    k=k, l=l_block,
+                    projection_matrix=cb["projection_matrix"],
+                )
+                self._nvembed_vsa_centroids: dict[str, np.ndarray] = {}
+                for i, name in enumerate(names):
+                    projected = enc._project_embedding(centroids[i])
+                    self._nvembed_vsa_centroids[name] = projected
+                print(f"  Projected {len(names)} NV-Embed centroids to VSA space")
+            else:
+                self._nvembed_vsa_centroids = {}
+        except Exception as e:
+            self._nvembed_vsa_centroids = {}
+            print(f"  Codebook projection failed: {e}")
 
     # ------------------------------------------------------------------
     # Index construction
@@ -208,6 +241,25 @@ class DomainClassifier:
             scores[domain] = overlap / len(kws)
         return scores
 
+    def _nvembed_scores(self, embedding: np.ndarray) -> dict[str, float]:
+        """Score domains against NV-Embed projected centroids.
+
+        These centroids capture full contextual meaning from 166k training
+        texts — much richer than axiom-name keywords. "superposition" near
+        "quantum" will cluster differently than near "circuit analysis".
+        """
+        if not hasattr(self, "_nvembed_vsa_centroids") or not self._nvembed_vsa_centroids:
+            return {}
+        codebook = np.stack(
+            list(self._nvembed_vsa_centroids.values()), axis=0,
+        )
+        sims = self._lib.bc.similarity_batch(embedding, codebook)
+        sims_shifted = (sims + 1.0) / 2.0
+        return {
+            domain: float(sims_shifted[i])
+            for i, domain in enumerate(self._nvembed_vsa_centroids)
+        }
+
     def _concept_scores(self, question: str) -> dict[str, float]:
         """Score domains by concept mapping — fast semantic routing."""
         q_tokens = _tokens(question)
@@ -262,15 +314,26 @@ class DomainClassifier:
         vsa = self._vsa_scores(embedding)
         kw = self._kw_scores(question) if question else {}
         concept = self._concept_scores(question) if question else {}
+        nvembed = self._nvembed_scores(embedding)
 
-        all_domains = set(vsa) | set(kw) | set(concept)
+        has_nvembed = bool(nvembed)
+        all_domains = set(vsa) | set(kw) | set(concept) | set(nvembed)
         blended: list[tuple[str, float]] = []
+
         for domain in all_domains:
-            score = (
-                self._vsa_weight * vsa.get(domain, 0.0)
-                + self._kw_weight * kw.get(domain, 0.0)
-                + _CONCEPT_WEIGHT * concept.get(domain, 0.0)
-            )
+            if has_nvembed:
+                score = (
+                    _NVEMBED_WEIGHT * nvembed.get(domain, 0.0)
+                    + _VSA_WEIGHT_NV * vsa.get(domain, 0.0)
+                    + _KW_WEIGHT_NV * kw.get(domain, 0.0)
+                    + _CONCEPT_WEIGHT_NV * concept.get(domain, 0.0)
+                )
+            else:
+                score = (
+                    self._vsa_weight * vsa.get(domain, 0.0)
+                    + self._kw_weight * kw.get(domain, 0.0)
+                    + _CONCEPT_WEIGHT * concept.get(domain, 0.0)
+                )
             blended.append((domain, score))
 
         blended.sort(key=lambda x: x[1], reverse=True)
