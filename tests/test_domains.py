@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from mowm.axiom_library import AxiomLibrary
 from mowm.domains import seed_all, available_domains
@@ -58,3 +59,53 @@ class TestPhysicsDomain:
         for a1, a2 in zip(axioms1, axioms2):
             sim = self.lib.bc.similarity(a1.vector, a2.vector)
             assert sim > 0.99, f"{a1.name} not deterministic: sim={sim}"
+
+
+EXPECTED_DOMAINS = [
+    "physics", "logic", "economics", "social", "linguistics",
+    "causal", "atomic", "bio", "music", "identity", "colors",
+    "language", "historical", "ensemble",
+]
+
+
+class TestAllDomains:
+    EXPECTED_DOMAINS = EXPECTED_DOMAINS
+
+    @classmethod
+    def setup_class(cls):
+        for d in cls.EXPECTED_DOMAINS:
+            try:
+                __import__(f"mowm.domains.{d}")
+            except ImportError:
+                pass
+
+    def test_all_14_domains_registered(self):
+        domains = available_domains()
+        for d in self.EXPECTED_DOMAINS:
+            assert d in domains, f"Domain '{d}' not registered"
+
+    @pytest.mark.parametrize("domain_name", EXPECTED_DOMAINS)
+    def test_domain_seeds_axioms(self, domain_name):
+        lib = AxiomLibrary(k=K, l=L)
+        seed_all(lib, domains=[domain_name])
+        assert len(lib) >= 5, f"{domain_name} seeded only {len(lib)} axioms"
+
+    @pytest.mark.parametrize("domain_name", EXPECTED_DOMAINS)
+    def test_domain_axiom_shapes(self, domain_name):
+        lib = AxiomLibrary(k=K, l=L)
+        seed_all(lib, domains=[domain_name])
+        for ax in lib.all_axioms():
+            assert ax.vector.shape == (K, L)
+            assert ax.vector.dtype == np.float32
+
+    @pytest.mark.parametrize("domain_name", EXPECTED_DOMAINS)
+    def test_domain_axioms_have_domain_prefix(self, domain_name):
+        lib = AxiomLibrary(k=K, l=L)
+        seed_all(lib, domains=[domain_name])
+        for ax in lib.all_axioms():
+            assert ax.domain.startswith(domain_name)
+
+    def test_total_axiom_count(self):
+        lib = AxiomLibrary(k=K, l=L)
+        seed_all(lib)
+        assert len(lib) >= 200, f"Expected 200+ axioms, got {len(lib)}"
