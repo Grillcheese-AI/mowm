@@ -83,6 +83,14 @@ User asks (voice or text)
    doubling wind speed quadruples destructive force."
 6. **VocalTract**: BREAKING_NEWS prosody, urgent cadence
 
+### 6. Combiner-Axial Attention (Token Pre-processor)
+- O(L*sqrt(L)) sub-quadratic attention from cubemind/reasoning/combiner.py
+- Processes raw token streams BEFORE VSA block-code encoding
+- Flow: Raw tokens → Combiner-Axial → SequenceEncoder → block-code VSA
+- Enables 10,000+ token context (WSJ articles, full documents, genomes)
+- Local direct attention + global block summaries with joint normalization
+- Already implemented in cubemind — just needs integration into mowm pipeline
+
 ## Dependencies (not yet in mowm)
 
 - spaCy (`en_core_web_sm`) for causal news extraction
