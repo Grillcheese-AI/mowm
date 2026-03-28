@@ -104,6 +104,91 @@ _CONCEPT_DOMAIN: dict[str, str] = {
     "hue": "colors", "saturation": "colors", "spectrum": "colors",
 }
 
+# Multi-word phrases → domain (contextual disambiguation)
+# These override single-word matches when the full phrase appears
+_PHRASE_DOMAIN: dict[str, str] = {
+    # Quantum / Atomic
+    "quantum superposition": "atomic",
+    "quantum mechanics": "atomic",
+    "quantum state": "atomic",
+    "wave function": "atomic",
+    "quantum entanglement": "atomic",
+    "quantum computing": "atomic",
+    "schrodinger equation": "atomic",
+    "uncertainty principle": "atomic",
+    "quantum field": "atomic",
+    "particle physics": "atomic",
+    # Physics / Circuits
+    "circuit analysis": "physics",
+    "circuit superposition": "physics",
+    "kirchhoff": "physics",
+    "ohm's law": "physics",
+    "electromagnetic": "physics",
+    "free fall": "physics",
+    "newton's law": "physics",
+    "newton's second": "physics",
+    "kinetic energy": "physics",
+    "potential energy": "physics",
+    "gravitational force": "physics",
+    "speed of light": "physics",
+    "special relativity": "physics",
+    "general relativity": "physics",
+    "fluid dynamics": "physics",
+    "bernoulli": "physics",
+    "navier stokes": "physics",
+    "thermodynamic": "physics",
+    # Economics
+    "supply and demand": "economics",
+    "interest rate": "economics",
+    "stock market": "economics",
+    "central bank": "economics",
+    "game theory": "economics",
+    "nash equilibrium": "economics",
+    "market equilibrium": "economics",
+    "monetary policy": "economics",
+    "fiscal policy": "economics",
+    # Bio
+    "natural selection": "bio",
+    "dna sequence": "bio",
+    "gene expression": "bio",
+    "kin selection": "bio",
+    "hamilton's rule": "bio",
+    "hardy weinberg": "bio",
+    "population genetics": "bio",
+    "molecular biology": "bio",
+    # Music
+    "harmonic series": "music",
+    "equal temperament": "music",
+    "major chord": "music",
+    "minor chord": "music",
+    "music theory": "music",
+    # Causal
+    "causal inference": "causal",
+    "do calculus": "causal",
+    "causal graph": "causal",
+    "counterfactual reasoning": "causal",
+    "granger causality": "causal",
+    # Historical
+    "world war": "historical",
+    "roman empire": "historical",
+    "industrial revolution": "historical",
+    "cold war": "historical",
+    # Security
+    "cyber security": "security",
+    "zero trust": "security",
+    "sql injection": "security",
+    "buffer overflow": "security",
+    "public key": "security",
+    "private key": "security",
+    # Social
+    "social network": "social",
+    "page rank": "social",
+    # Language
+    "natural language": "language",
+    "context free grammar": "linguistics",
+    "dependency parsing": "linguistics",
+}
+
 
 def _tokens(text: str) -> set[str]:
     """Return lowercased tokens from a string."""
@@ -261,13 +346,26 @@ class DomainClassifier:
         }
 
     def _concept_scores(self, question: str) -> dict[str, float]:
-        """Score domains by concept mapping — fast semantic routing."""
+        """Score domains by concept mapping + contextual phrase matching.
+
+        Single-word concepts use _CONCEPT_DOMAIN.
+        Multi-word phrases use _PHRASE_DOMAIN for contextual disambiguation.
+        """
+        q_lower = question.lower()
         q_tokens = _tokens(question)
-        domain_hits: dict[str, int] = {}
+        domain_hits: dict[str, float] = {}
+
+        # Phase 1: Multi-word phrase matching (higher weight — captures context)
+        for phrase, domain in _PHRASE_DOMAIN.items():
+            if phrase in q_lower:
+                domain_hits[domain] = domain_hits.get(domain, 0) + 3.0
+
+        # Phase 2: Single-word concept matching
         for token in q_tokens:
             domain = _CONCEPT_DOMAIN.get(token)
             if domain:
-                domain_hits[domain] = domain_hits.get(domain, 0) + 1
+                domain_hits[domain] = domain_hits.get(domain, 0) + 1.0
+
         total_hits = sum(domain_hits.values()) or 1
         return {d: hits / total_hits for d, hits in domain_hits.items()}
 
