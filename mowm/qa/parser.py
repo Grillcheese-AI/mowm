@@ -184,7 +184,11 @@ class QuestionParser:
         tail = m.group(1)
         # Split on "and" boundaries (word boundary, case-insensitive)
         parts = re.split(r"\s+and\s+", tail, flags=re.IGNORECASE)
-        return [p.strip() for p in parts if p.strip()]
+        # Strip punctuation (?, !, .) from condition names
+        return [
+            p.strip().rstrip("?!.,;:") for p in parts
+            if p.strip().rstrip("?!.,;:")
+        ]
 
     # ------------------------------------------------------------------
     # Keywords

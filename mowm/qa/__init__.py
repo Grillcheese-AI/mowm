@@ -21,7 +21,15 @@ from mowm.qa.classifier import DomainClassifier
 from mowm.qa.expert_bid_classifier import ExpertBidClassifier
 from mowm.qa.direct_solver import DirectSolver, QAResponse
 from mowm.qa.formatter import ResponseFormatter
+from mowm.qa.factual_lookup import FactualLookup
 from mowm.qa.parser import QuestionParser
+
+# Factual question patterns (when/where/who)
+import re as _re
+_FACTUAL_RE = _re.compile(
+    r"^\s*(?:when|where|who|what year|what date|what happened)\b",
+    _re.IGNORECASE,
+)
 
 
 class QAPipeline:
@@ -50,6 +58,7 @@ class QAPipeline:
         codebook_path: str | None = None,
         llm_endpoint: str | None = None,
         api_key: str | None = None,
+        factual_data_paths: list[str] | None = None,
     ) -> None:
         self._lib = library
         self._executor = executor
@@ -78,6 +87,14 @@ class QAPipeline:
             executor=executor,
             llm_endpoint=llm_endpoint,
             api_key=api_key,
+        )
+
+        # Factual lookup for when/where/who questions
+        default_fact_paths = [
+            "D:/grillcheese_training_data/temporal/historical",
+        ]
+        self._factual = FactualLookup(
+            data_paths=factual_data_paths or default_fact_paths,
         )
 
     # ------------------------------------------------------------------
@@ -118,6 +135,35 @@ class QAPipeline:
 
         # 2. Parse question
         parsed = self._parser.parse(question)
+
+        # 2.5 Try factual lookup for when/where/who questions
+        if _FACTUAL_RE.match(question) and self._factual.count > 0:
+            fact_results = self._factual.search(question, top_n=3)
+            if fact_results:
+                best = fact_results[0]
+                answer_lines = [best.answer]
+                if best.year:
+                    answer_lines.insert(0, f"**{best.year}**")
+                if len(fact_results) > 1:
+                    answer_lines.append("\n**Related:**")
+                    for fr in fact_results[1:]:
+                        snippet = fr.answer[:150]
+                        answer_lines.append(f"- {snippet}...")
+
+                return QAResponse(
+                    answer="\n".join(answer_lines),
+                    mode="FACTUAL",
+                    confidence=0.75,
+                    domain=domain,
+                    evidence=[
+                        f"Factual lookup ({self._factual.count} entries)",
+                    ],
+                    reasoning_trace=[
+                        f"Factual question detected (when/where/who).",
+                        f"Searched {self._factual.count} historical entries.",
+                        f"Top match: {best.question[:80]}",
+                    ],
+                )
 
         # 3. Try direct solve
         if self._direct.can_solve(parsed, domain):
