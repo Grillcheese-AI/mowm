@@ -62,8 +62,12 @@ class CubbyBridge:
         # (a) exact reuse of a previously-answered challenge
         if key in self._specialist_for:
             world = self._world_by_id(self._specialist_for[key])
-            pred, conf = world.predict(ctx, action)
-            return ChallengeResult(pred, str(world.world_id), float(conf), False)
+            if world is not None:
+                pred, conf = world.predict(ctx, action)
+                return ChallengeResult(pred, str(world.world_id), float(conf), False)
+            # the memoized world was pruned since; drop the stale entry and
+            # fall through to re-route (b) or re-spawn (c) a fresh specialist.
+            del self._specialist_for[key]
 
         # (b) a known world whose signature matches the challenge
         best, best_sim = self._best_match(ctx)
@@ -81,7 +85,9 @@ class CubbyBridge:
         pred, conf = world.predict(ctx, action)
         return ChallengeResult(pred, str(world.world_id), float(conf), True)
 
-    # underlying channels (attempt() drives register_specialist via maybe_spawn)
+    # Remaining WorldModelBridge Protocol channels. attempt() is the primary
+    # entry and appends spawned world_ids to self.registered directly; these
+    # satisfy the rest of the Protocol for callers that use them.
     def push_context(self, ctx) -> None: ...
     def pull_context(self): return None
     def emit_novelty(self, event: object) -> None: ...
