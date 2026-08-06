@@ -41,17 +41,24 @@ class CubbyBridge:
         )
 
     def _world_by_id(self, world_id: int):
-        for w in self.router._worlds.values():
-            if w.world_id == world_id:
-                return w
-        return None
+        return self.router.get_world_by_id(world_id)
 
     def _best_match(self, ctx: np.ndarray):
+        """Best world for ctx by max cosine to any of its individual axioms.
+
+        A world's ``axiom_vec`` is a bind-chain over its axioms, which VSA
+        binding makes quasi-orthogonal to those axioms and to any real context
+        -- so cosine against it never fires for organic contexts. We route on
+        the individual axiom vectors instead (the same similarity basis
+        ``AxiomLibrary.select`` uses), which actually reflects whether the
+        challenge resembles something the world already knows.
+        """
         best, best_sim = None, -1.0
-        for w in self.router._worlds.values():
-            sim = _cosine(ctx, np.asarray(w.axiom_vec))
-            if sim > best_sim:
-                best, best_sim = w, sim
+        for w in self.router.active_worlds():
+            for ax in w.axioms:
+                sim = _cosine(ctx, np.asarray(ax.vector))
+                if sim > best_sim:
+                    best, best_sim = w, sim
         return best, best_sim
 
     def attempt(self, challenge: Challenge) -> ChallengeResult:
@@ -81,13 +88,14 @@ class CubbyBridge:
         if world is None:                            # pool full / no axioms
             raise RuntimeError("CubbyBridge: could not spawn a specialist")
         self._specialist_for[key] = world.world_id
-        self.registered.append(world.world_id)
+        self.register_specialist(world.world_id)
         pred, conf = world.predict(ctx, action)
         return ChallengeResult(pred, str(world.world_id), float(conf), True)
 
     # Remaining WorldModelBridge Protocol channels. attempt() is the primary
-    # entry and appends spawned world_ids to self.registered directly; these
-    # satisfy the rest of the Protocol for callers that use them.
+    # entry and routes spawned world_ids through register_specialist() below
+    # (the one write-path to self.registered); these satisfy the rest of the
+    # Protocol for callers that use them.
     def push_context(self, ctx) -> None: ...
     def pull_context(self): return None
     def emit_novelty(self, event: object) -> None: ...

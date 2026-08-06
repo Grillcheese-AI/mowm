@@ -47,9 +47,49 @@ def test_novel_challenge_spawns_a_specialist_then_reuses_it():
 def test_known_challenge_routes_without_spawning():
     bridge = _bridge()
     before = bridge.num_worlds
-    known_ctx = np.asarray(bridge._world_by_id(100).axiom_vec, dtype=np.float32)
+    world_100 = bridge._world_by_id(100)
+    # world_100.axioms[0] ("Rotational KE", physics.energy) is a real individual
+    # axiom of world 100, not the axiom_vec bind-chain. Uniqueness of the route
+    # is guaranteed, not assumed: cosine between two one-hot-per-block codes is
+    # exactly 1.0 iff every block matches, i.e. iff the vectors are identical --
+    # so cosine(known_ctx, ax) < 1.0 for any ax that isn't a literal duplicate of
+    # this vector. world 100 (seeded from lib.select(seed=1)) and world 200
+    # (seeded from lib.select(seed=2)) are disjoint axiom-vector selections
+    # (verified by an exact-equality sweep over both 3-axiom slices -- no shared
+    # vector), so this axiom cannot tie world 200 and world 100 wins uniquely.
+    known_ctx = np.asarray(world_100.axioms[0].vector, dtype=np.float32)
 
     r = bridge.attempt(Challenge(context=known_ctx, tag="known-physics"))
     assert r.spawned is False                              # reuse control
     assert r.world_id == "100"
     assert bridge.num_worlds == before                     # no spurious spawn
+
+
+def test_fuzzy_axiom_perturbation_still_routes_by_similarity():
+    """Near-miss coverage for path (b): a context that is NOT an exact axiom
+    copy but is close to one (cosine 0.75, above tau_match=0.35) must still
+    route to that axiom's world -- proving real similarity routing, not just
+    an exact-match short-circuit."""
+    bridge = _bridge()
+    before = bridge.num_worlds
+    world_100 = bridge._world_by_id(100)
+    axiom_vec = np.asarray(world_100.axioms[0].vector, dtype=np.float32)
+
+    # Move block 0's active one-hot slot to a different index. k=4 blocks, one
+    # perturbed => 3/4 blocks still match => cosine = 3/4 = 0.75 to the
+    # original axiom: >= tau_match (0.35) and < 1.0, i.e. genuinely fuzzy, not
+    # an exact copy. Verified (see routing script) that this perturbed vector's
+    # cosine to every world-200 axiom stays ~0 (no coincidental near-match), so
+    # its 0.75 to the world-100 axiom is the unique max across both worlds.
+    perturbed = axiom_vec.copy()
+    block0 = perturbed[0]
+    old_idx = int(np.argmax(block0))
+    new_idx = (old_idx + 1) % block0.shape[0]
+    block0[old_idx] = 0.0
+    block0[new_idx] = 1.0
+
+    # fresh tag: path (a)'s exact-reuse memo can't short-circuit this challenge
+    r = bridge.attempt(Challenge(context=perturbed, tag="fuzzy-physics"))
+    assert r.spawned is False                               # similarity match, not spawn
+    assert r.world_id == "100"
+    assert bridge.num_worlds == before                      # no spurious spawn

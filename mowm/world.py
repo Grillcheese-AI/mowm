@@ -160,7 +160,7 @@ class World(BaseWorld):
 
     @property
     def axiom_vec(self) -> np.ndarray:
-        """The world's bundled-axiom signature (used for challenge routing)."""
+        """The world's bound-axiom signature (a bind-chain over the world's axioms)."""
         return self._axiom_vec
 
     @property
