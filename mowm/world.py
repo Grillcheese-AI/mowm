@@ -225,18 +225,18 @@ class World(BaseWorld):
         total_obs = max(self._obs_count + other._obs_count, 1)
         weight_other = other._obs_count / total_obs
 
+        # Oja-merge every current HYLA weight matrix. HYLA's old monolithic W_H
+        # output matrix (53GB at d_vsa=10240) was factored into the low-rank
+        # W_A + W_B pair; merge those, not the removed W_H (see
+        # cubemind/execution/hyla.py).
         for h_self, h_other in zip(self.hylas, other.hylas):
-            w_h_self = np.asarray(h_self.W_h, dtype=np.float32)
-            w_h_other = np.asarray(h_other.W_h, dtype=np.float32)
-            w_H_self = np.asarray(h_self.W_H, dtype=np.float32)
-            w_H_other = np.asarray(h_other.W_H, dtype=np.float32)
-
-            h_self.W_h = (
-                w_h_self + alpha * weight_other * (w_h_other - w_h_self)
-            ).astype(np.float32)
-            h_self.W_H = (
-                w_H_self + alpha * weight_other * (w_H_other - w_H_self)
-            ).astype(np.float32)
+            for attr in ("W_h", "W_A", "W_B"):
+                w_self = np.asarray(getattr(h_self, attr), dtype=np.float32)
+                w_other = np.asarray(getattr(h_other, attr), dtype=np.float32)
+                merged = (
+                    w_self + alpha * weight_other * (w_other - w_self)
+                ).astype(np.float32)
+                setattr(h_self, attr, merged)
 
         self._axiom_vec = self.bc.bundle(
             [self._axiom_vec, other._axiom_vec], normalize=True
