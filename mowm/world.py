@@ -159,6 +159,11 @@ class World(BaseWorld):
         return self._obs_count
 
     @property
+    def axiom_vec(self) -> np.ndarray:
+        """The world's bundled-axiom signature (used for challenge routing)."""
+        return self._axiom_vec
+
+    @property
     def last_selected_step(self) -> int:
         return self._last_selected_step
 
