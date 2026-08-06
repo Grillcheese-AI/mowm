@@ -5,7 +5,7 @@ Self-organizing recursive expert worlds with a living axiom library,
 14 domain modules, discovery loop via symbolic regression, and
 dynamic expert spawn/prune.
 
-Public API (v0.2.0):
+Public API (v0.3.0):
     MoWMPipeline — End-to-end pipeline orchestrator
     AxiomLibrary — Global world axiom storage
     Axiom — Single axiom dataclass
@@ -20,9 +20,11 @@ Public API (v0.2.0):
     IdentityState — Personal world model with Plutchik emotions
     GridWorld — 2-D simulation environment
     MoWMTrainer — Training loop with prediction + confidence loss
+    QAPipeline — Q&A orchestrator (direct-first, augmented-fallback)
+    QAResponse — Structured Q&A answer dataclass
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 from mowm.axiom_library import Axiom, AxiomLibrary
 from mowm.causal_graph import CausalGraph
@@ -32,6 +34,7 @@ from mowm.identity_state import IdentityState
 from mowm.logic_engine import LogicEngine
 from mowm.phasor_engine import PhasorEngine
 from mowm.pipeline import MoWMPipeline, StepResult
+from mowm.qa import QAPipeline, QAResponse
 from mowm.router import MoWMRouter
 from mowm.sequence_encoder import SequenceEncoder
 from mowm.sim_environment import GridWorld
@@ -50,6 +53,8 @@ __all__ = [
     "MoWMRouter",
     "MoWMTrainer",
     "PhasorEngine",
+    "QAPipeline",
+    "QAResponse",
     "SafeFormulaExecutor",
     "SequenceEncoder",
     "StepResult",

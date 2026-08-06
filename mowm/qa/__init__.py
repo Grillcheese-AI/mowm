@@ -27,7 +27,12 @@ from mowm.qa.parser import QuestionParser
 # Factual question patterns (when/where/who)
 import re as _re
 _FACTUAL_RE = _re.compile(
-    r"^\s*(?:when|where|who|what year|what date|what happened)\b",
+    r"^\s*(?:when|where|who|what year|what date)\b",
+    _re.IGNORECASE,
+)
+# "what happened" is too broad — only trigger if a year follows
+_WHAT_HAPPENED_RE = _re.compile(
+    r"^\s*what\s+happened\s+(?:in\s+)?(\d{3,4})\b",
     _re.IGNORECASE,
 )
 
@@ -137,13 +142,23 @@ class QAPipeline:
         parsed = self._parser.parse(question)
 
         # 2.5 Try factual lookup for when/where/who questions
-        if _FACTUAL_RE.match(question) and self._factual.count > 0:
+        # Also handle "what happened in YEAR" with year-specific search
+        _what_happened = _WHAT_HAPPENED_RE.match(question)
+        is_factual = _FACTUAL_RE.match(question) or _what_happened
+        if is_factual and self._factual.count > 0:
             fact_results = self._factual.search(question, top_n=3)
             if fact_results:
                 best = fact_results[0]
                 answer_lines = [best.answer]
-                if best.year:
-                    answer_lines.insert(0, f"**{best.year}**")
+
+                # Try to find a year: from entry, from question, or from answer text
+                year = best.year
+                if not year:
+                    year = self._factual._extract_year(best.question)
+                if not year:
+                    year = self._factual._extract_year(best.answer)
+                if year:
+                    answer_lines.insert(0, f"**{year} AD**\n")
                 if len(fact_results) > 1:
                     answer_lines.append("\n**Related:**")
                     for fr in fact_results[1:]:

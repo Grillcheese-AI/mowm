@@ -10,3 +10,8 @@ build/
 .ruff_cache/
 to_read/QUIDS/
 /to_read
+.pytest_cache
+.benchmarks
+Hyperdimensional_Probe_Decoding_LLM_Representation.pdf
+mowm_nvembed_codebook.npz
+notebooks/extract_qwen_embeddings.ipynb

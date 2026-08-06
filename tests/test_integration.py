@@ -21,7 +21,7 @@ K, L = 4, 32
 class TestPublicAPI:
     def test_version(self):
         import mowm
-        assert mowm.__version__ == "0.2.0"
+        assert mowm.__version__ == "0.3.0"
 
     def test_all_exports(self):
         import mowm

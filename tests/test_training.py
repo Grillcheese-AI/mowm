@@ -231,7 +231,7 @@ class TestV02Integration:
 
     def test_version_is_020(self):
         import mowm
-        assert mowm.__version__ == "0.2.0"
+        assert mowm.__version__ == "0.3.0"
 
     def test_all_v02_exports_present(self):
         import mowm
