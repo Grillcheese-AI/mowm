@@ -109,6 +109,18 @@ def test_npz_roundtrip_preserves_encoding(tmp_path):
     assert loaded.k == K and loaded.l == L
 
 
+def test_npz_f16_roundtrip_is_close(tmp_path):
+    enc = _encoder()
+    p = tmp_path / "table_f16.npz"
+    enc.save_npz(p, dtype=np.float16)
+    loaded = FastWordEncoder.from_npz(p)
+    a = enc.encode("force acceleration").ravel()
+    b = loaded.encode("force acceleration").ravel()
+    assert b.dtype == np.float32                      # cast back on load
+    cos = float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-12))
+    assert cos > 0.999                                 # f16 costs ~1e-3, not more
+
+
 def test_split_words_matches_the_validated_unit():
     assert split_words("Newton's Second Law: F = m*a!") == {
         "newton", "second", "law"

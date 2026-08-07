@@ -168,12 +168,14 @@ class FastWordEncoder:
 
     # -- persistence -----------------------------------------------------------
 
-    def save_npz(self, path) -> None:
+    def save_npz(self, path, dtype=np.float32) -> None:
+        """``dtype=np.float16`` halves a production-size table on disk;
+        ``from_npz`` casts back to float32 (cosine impact is ~1e-3)."""
         words = sorted(self._vec)
         np.savez_compressed(
             path,
             words=np.array(words),
-            vectors=np.stack([self._vec[w] for w in words]),
+            vectors=np.stack([self._vec[w] for w in words]).astype(dtype),
             idf_words=np.array(sorted(self._idf)),
             idf_values=np.array([self._idf[w] for w in sorted(self._idf)],
                                 dtype=np.float32),
