@@ -3,6 +3,20 @@
 Dependency points mowm -> cubbyllm (never the reverse): CubbyLLM ships the
 Protocol + Challenge/ChallengeResult; this adapter drives MoWM's router/library
 to answer a challenge, spawning a specialist world when none fits.
+
+Routing rule history (each step validated in CubbyLLM's validation/logs/):
+M1 routed on the axiom_vec bind-chain — measured inert (quasi-orthogonal to
+its own parts) and re-based onto individual axioms. The M3 open-set screen
+(exp_m3_open_set) then showed CENTROID routing beats max-over-individual-
+axioms 0.680 vs 0.589 macro at ~40x fewer comparisons, and that a MARGIN gate
+(best minus second-best world) is the right route-vs-spawn signal: at its
+calibrated tau it routed with 92% precision while sending 87% of never-seen-
+domain challenges to spawn. Tier (b) below implements exactly that: route iff
+the best centroid score clears the absolute floor AND (with 2+ worlds) the
+margin clears tau_margin; everything else falls through to spawn — the safe
+side, since a spawned specialist is a recoverable outcome and a mis-route is
+not. Both taus are deployment-calibrated (the screens are the method); the
+defaults preserve the toy-scale test semantics.
 """
 from __future__ import annotations
 
@@ -24,10 +38,11 @@ def _cosine(a: np.ndarray, b: np.ndarray) -> float:
 
 class CubbyBridge:
     def __init__(self, library: AxiomLibrary, router: MoWMRouter,
-                 tau_match: float = 0.35) -> None:
+                 tau_match: float = 0.35, tau_margin: float = 0.02) -> None:
         self.library = library
         self.router = router
-        self.tau_match = tau_match
+        self.tau_match = tau_match          # absolute floor on the best centroid score
+        self.tau_margin = tau_margin        # best-minus-second gate (2+ worlds)
         self._specialist_for: dict[str, int] = {}   # challenge key -> world_id
         self.registered: list[int] = []
 
@@ -43,23 +58,19 @@ class CubbyBridge:
     def _world_by_id(self, world_id: int):
         return self.router.get_world_by_id(world_id)
 
-    def _best_match(self, ctx: np.ndarray):
-        """Best world for ctx by max cosine to any of its individual axioms.
+    def _world_scores(self, ctx: np.ndarray) -> list[tuple[object, float]]:
+        """Active worlds scored by cosine to their AXIOM CENTROID, best first.
 
-        A world's ``axiom_vec`` is a bind-chain over its axioms, which VSA
-        binding makes quasi-orthogonal to those axioms and to any real context
-        -- so cosine against it never fires for organic contexts. We route on
-        the individual axiom vectors instead (the same similarity basis
-        ``AxiomLibrary.select`` uses), which actually reflects whether the
-        challenge resembles something the world already knows.
+        The centroid (normalized mean of a world's individual axioms) is the
+        similarity-preserving bundled signature — one comparison per world
+        instead of one per axiom, and measurably better routing
+        (exp_m3_open_set: 0.680 vs 0.589 macro). The bind-chain ``axiom_vec``
+        remains unusable for routing (the M1 finding).
         """
-        best, best_sim = None, -1.0
-        for w in self.router.active_worlds():
-            for ax in w.axioms:
-                sim = _cosine(ctx, np.asarray(ax.vector))
-                if sim > best_sim:
-                    best, best_sim = w, sim
-        return best, best_sim
+        scores = [(w, _cosine(ctx, np.asarray(w.axiom_centroid)))
+                  for w in self.router.active_worlds()]
+        scores.sort(key=lambda ws: -ws[1])
+        return scores
 
     def attempt(self, challenge: Challenge) -> ChallengeResult:
         ctx = np.asarray(challenge.context, dtype=np.float32)
@@ -76,12 +87,17 @@ class CubbyBridge:
             # fall through to re-route (b) or re-spawn (c) a fresh specialist.
             del self._specialist_for[key]
 
-        # (b) a known world whose signature matches the challenge
-        best, best_sim = self._best_match(ctx)
-        if best is not None and best_sim >= self.tau_match:
-            self._specialist_for[key] = best.world_id
-            pred, conf = best.predict(ctx, action)
-            return ChallengeResult(pred, str(best.world_id), float(conf), False)
+        # (b) centroid routing with the margin gate: route only when one world
+        # clearly wins. Ambiguity (small margin) falls through to spawn — the
+        # recoverable outcome — matching the validated conservative profile.
+        scores = self._world_scores(ctx)
+        if scores:
+            best, s1 = scores[0]
+            margin_ok = len(scores) < 2 or (s1 - scores[1][1]) >= self.tau_margin
+            if s1 >= self.tau_match and margin_ok:
+                self._specialist_for[key] = best.world_id
+                pred, conf = best.predict(ctx, action)
+                return ChallengeResult(pred, str(best.world_id), float(conf), False)
 
         # (c) novel: grow a specialist from the nearest axioms
         world = self.router.maybe_spawn(ctx, self.library)

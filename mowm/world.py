@@ -164,6 +164,29 @@ class World(BaseWorld):
         return self._axiom_vec
 
     @property
+    def axiom_centroid(self) -> np.ndarray:
+        """Normalized mean of this world's individual axiom vectors.
+
+        The similarity-preserving BUNDLED signature: cosine to the centroid
+        reflects resemblance to the world's axioms, unlike ``axiom_vec`` (a
+        bind-chain, quasi-orthogonal to its own parts, unusable for routing —
+        the H-F2 M1 finding). Centroid routing beat max-over-individual-axioms
+        0.680 vs 0.589 macro at ~40x fewer comparisons in CubbyLLM's
+        exp_m3_open_set screen. Recomputed per access (worlds hold few
+        axioms); an empty-axiom world falls back to its normalized random
+        signature so the property is always defined.
+        """
+        if not self.axioms:
+            v = self._axiom_vec.astype(np.float64).ravel()
+            return (v / (np.linalg.norm(v) + 1e-12)).reshape(
+                self._axiom_vec.shape).astype(np.float32)
+        M = np.stack([np.asarray(a.vector, dtype=np.float64).ravel()
+                      for a in self.axioms])
+        c = M.mean(axis=0)
+        return (c / (np.linalg.norm(c) + 1e-12)).reshape(
+            self.axioms[0].vector.shape).astype(np.float32)
+
+    @property
     def last_selected_step(self) -> int:
         return self._last_selected_step
 
