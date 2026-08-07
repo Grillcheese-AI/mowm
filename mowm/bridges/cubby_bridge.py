@@ -15,8 +15,15 @@ domain challenges to spawn. Tier (b) below implements exactly that: route iff
 the best centroid score clears the absolute floor AND (with 2+ worlds) the
 margin clears tau_margin; everything else falls through to spawn — the safe
 side, since a spawned specialist is a recoverable outcome and a mis-route is
-not. Both taus are deployment-calibrated (the screens are the method); the
-defaults preserve the toy-scale test semantics.
+not. Tier (b2) adds the inter-world query validated in
+exp_m3_temporal_causal: when the centroid winner's own best MEMBER match
+falls short of tau_answer (the world routes well but is missing the specific
+answer), the router forwards the query world-to-world and the bridge
+redirects to the world that actually holds it — at the screen's calibrated
+tau this matched exhaustive flat search's answer-found rate at ~60x fewer
+member comparisons, delegating 2% of queries. All taus are
+deployment-calibrated (the screens are the method); the defaults preserve
+the toy-scale test semantics.
 """
 from __future__ import annotations
 
@@ -38,11 +45,15 @@ def _cosine(a: np.ndarray, b: np.ndarray) -> float:
 
 class CubbyBridge:
     def __init__(self, library: AxiomLibrary, router: MoWMRouter,
-                 tau_match: float = 0.35, tau_margin: float = 0.02) -> None:
+                 tau_match: float = 0.35, tau_margin: float = 0.02,
+                 tau_answer: float | None = 0.6) -> None:
         self.library = library
         self.router = router
         self.tau_match = tau_match          # absolute floor on the best centroid score
         self.tau_margin = tau_margin        # best-minus-second gate (2+ worlds)
+        # member-level inter-world query threshold (exp_m3_temporal_causal's
+        # validated operating point); None disables delegation entirely.
+        self.tau_answer = tau_answer
         self._specialist_for: dict[str, int] = {}   # challenge key -> world_id
         self.registered: list[int] = []
 
@@ -95,9 +106,25 @@ class CubbyBridge:
             best, s1 = scores[0]
             margin_ok = len(scores) < 2 or (s1 - scores[1][1]) >= self.tau_margin
             if s1 >= self.tau_match and margin_ok:
-                self._specialist_for[key] = best.world_id
-                pred, conf = best.predict(ctx, action)
-                return ChallengeResult(pred, str(best.world_id), float(conf), False)
+                world = best
+                # (b2) inter-world query: the centroid winner may still be
+                # MISSING the specific answer. If its best member falls short
+                # of tau_answer, the router forwards the query world-to-world
+                # (exp_m3_temporal_causal's delegation protocol); the bridge
+                # redirects only when another world actually CLEARED the
+                # threshold — an exhausted query stays with the centroid
+                # winner, and route-vs-spawn is never affected.
+                if self.tau_answer is not None:
+                    _, own_score = best.best_member(ctx)
+                    if own_score < self.tau_answer:
+                        ans = self.router.query_worlds(ctx, self.tau_answer)
+                        if ans is not None and ans.found:
+                            holder = self._world_by_id(ans.world_id)
+                            if holder is not None:
+                                world = holder
+                self._specialist_for[key] = world.world_id
+                pred, conf = world.predict(ctx, action)
+                return ChallengeResult(pred, str(world.world_id), float(conf), False)
 
         # (c) novel: grow a specialist from the nearest axioms
         world = self.router.maybe_spawn(ctx, self.library)

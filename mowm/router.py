@@ -7,6 +7,7 @@ of expert worlds. Maintains a max-capacity gate and masks inactive slots.
 from __future__ import annotations
 
 import itertools
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -18,9 +19,26 @@ from mowm.base import BaseRouter
 from mowm.world import World
 
 if TYPE_CHECKING:
-    from mowm.axiom_library import AxiomLibrary
+    from mowm.axiom_library import Axiom, AxiomLibrary
 
 _spawn_id_counter = itertools.count(start=5000)
+
+
+@dataclass
+class WorldAnswer:
+    """Outcome of a router-mediated inter-world query.
+
+    found is True when a world's best member cleared tau_answer; False means
+    every consulted world was missing the answer and the result is the
+    globally best member seen (the protocol's fallback).
+    """
+
+    world_id: int
+    axiom: "Axiom | None"
+    member_score: float
+    worlds_consulted: int
+    delegated: bool          # True when the answering world was not ranked first
+    found: bool
 
 
 class MoWMRouter(BaseRouter):
@@ -188,6 +206,64 @@ class MoWMRouter(BaseRouter):
     def entropy_reg(self) -> float:
         expert_weights = self._gate.forward()
         return float(self._gate.entropy_regularization(expert_weights))
+
+    def query_worlds(
+        self,
+        ctx: np.ndarray,
+        tau_answer: float,
+        max_worlds: int | None = None,
+    ) -> WorldAnswer | None:
+        """Router-mediated inter-world query: a world missing the answer
+        passes the query to the next world.
+
+        The delegation protocol validated in CubbyLLM's
+        exp_m3_temporal_causal screen: rank active worlds by cosine to their
+        axiom CENTROID (the similarity-preserving bundle); consult the top
+        world's individual members (``World.best_member``); if the best
+        member clears ``tau_answer`` that world answers, otherwise the query
+        passes to the next world; when every world has been consulted the
+        globally best member seen answers (``found=False``). At its
+        calibrated tau this matched exhaustive flat search's answer-found
+        rate at ~60x fewer member comparisons with 2% of queries delegated
+        — and tau_answer, like every tau in this project, is
+        deployment-calibrated and does not transfer across corpora.
+
+        Worlds never reference each other; the router mediates every hop
+        (deny-by-default). Returns None when no worlds are active.
+        """
+        worlds = self.active_worlds()
+        if not worlds:
+            return None
+        c = np.asarray(ctx, dtype=np.float64).ravel()
+        cn = np.linalg.norm(c)
+
+        def centroid_score(w: World) -> float:
+            v = np.asarray(w.axiom_centroid, dtype=np.float64).ravel()
+            vn = np.linalg.norm(v)
+            if cn == 0.0 or vn == 0.0:
+                return 0.0
+            return float(c @ v / (cn * vn))
+
+        ranked = sorted(worlds, key=centroid_score, reverse=True)
+        if max_worlds is not None:
+            ranked = ranked[:max_worlds]
+
+        best: WorldAnswer | None = None
+        for rank, w in enumerate(ranked):
+            axiom, score = w.best_member(ctx)
+            if best is None or score > best.member_score:
+                best = WorldAnswer(world_id=w.world_id, axiom=axiom,
+                                   member_score=score,
+                                   worlds_consulted=rank + 1,
+                                   delegated=rank > 0, found=False)
+            if score >= tau_answer:
+                return WorldAnswer(world_id=w.world_id, axiom=axiom,
+                                   member_score=score,
+                                   worlds_consulted=rank + 1,
+                                   delegated=rank > 0, found=True)
+        assert best is not None
+        best.worlds_consulted = len(ranked)     # exhausted every world
+        return best
 
     def get_world_by_id(self, world_id: int) -> World | None:
         slot = self._world_id_to_slot.get(world_id)

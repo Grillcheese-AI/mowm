@@ -186,6 +186,29 @@ class World(BaseWorld):
         return (c / (np.linalg.norm(c) + 1e-12)).reshape(
             self.axioms[0].vector.shape).astype(np.float32)
 
+    def best_member(self, ctx: np.ndarray) -> tuple["Axiom | None", float]:
+        """The world's internal lookup: its best-matching individual axiom.
+
+        This is the "do I actually hold this?" primitive behind inter-world
+        query (CubbyLLM's exp_m3_temporal_causal delegation screen): routing
+        says which world *should* answer; best_member says whether that
+        world's stored knowledge actually contains a match. An empty-axiom
+        world returns (None, -1.0) and so never clears any answer threshold.
+        """
+        if not self.axioms:
+            return None, -1.0
+        c = np.asarray(ctx, dtype=np.float64).ravel()
+        cn = np.linalg.norm(c)
+        if cn == 0.0:
+            return None, -1.0
+        M = np.stack([np.asarray(a.vector, dtype=np.float64).ravel()
+                      for a in self.axioms])
+        norms = np.linalg.norm(M, axis=1)
+        norms[norms == 0.0] = 1.0
+        sims = (M @ c) / (norms * cn)
+        i = int(np.argmax(sims))
+        return self.axioms[i], float(sims[i])
+
     @property
     def last_selected_step(self) -> int:
         return self._last_selected_step
