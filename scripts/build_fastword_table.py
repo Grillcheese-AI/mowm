@@ -180,7 +180,8 @@ def main() -> None:
     enc = FastWordEncoder.build(
         vocab, _embed_fn, idf, default_idf,
         k=args.k, l=args.l, proj_seed=args.proj_seed, anisotropy=anis,
-        meta={"teacher": "sentence-transformers/all-MiniLM-L6-v2",
+        signal_blend=args.signal_blend,
+        meta={"teacher": args.teacher,
               "shard": pathlib.Path(args.shard).name, "docs": n_docs,
               "doc_len": args.doc_len, "top_words": args.top_words,
               "anisotropy": "mean+PC1 fit on full broad vocabulary",
