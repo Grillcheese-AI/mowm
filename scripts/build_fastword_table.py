@@ -116,6 +116,13 @@ def main() -> None:
     ap.add_argument("--l", type=int, default=128)
     ap.add_argument("--proj-seed", type=int, default=0)
     ap.add_argument("--batch", type=int, default=256)
+    ap.add_argument("--teacher",
+                    default="st:sentence-transformers/all-MiniLM-L6-v2",
+                    help="st:<sentence-transformers id> or m2v:<model2vec "
+                         "static id> (e.g. m2v:minishlab/potion-base-8M — "
+                         "the teacher swap CubbyLLM's exp_m3_potion_baseline "
+                         "measured at +0.05 routing macro over MiniLM)")
+    ap.add_argument("--signal-blend", type=float, default=0.5)
     args = ap.parse_args()
 
     t_all = time.perf_counter()
@@ -138,18 +145,30 @@ def main() -> None:
     idf = {w: float(np.log(n_docs / df[w])) for w in vocab if w in df}
     default_idf = float(np.log(n_docs))
 
-    print("embedding vocabulary with the teacher (once, offline)...")
-    from sentence_transformers import SentenceTransformer
-
+    kind, _, teacher_id = args.teacher.partition(":")
+    print(f"embedding vocabulary with the teacher ({args.teacher}; once, offline)...")
     t0 = time.perf_counter()
-    model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-    E = np.zeros((len(vocab), 384), dtype=np.float32)
-    for a0 in range(0, len(vocab), 5000):
-        b0 = min(a0 + 5000, len(vocab))
-        E[a0:b0] = model.encode(vocab[a0:b0], batch_size=args.batch,
-                                show_progress_bar=False)
-        print(f"  embedded {b0}/{len(vocab)} ({time.perf_counter() - t0:.0f}s)", flush=True)
+    if kind == "m2v":
+        from model2vec import StaticModel
+
+        model = StaticModel.from_pretrained(teacher_id)
+        E = np.asarray(model.encode(vocab, show_progress_bar=False),
+                       dtype=np.float32)
+    elif kind == "st":
+        from sentence_transformers import SentenceTransformer
+
+        model = SentenceTransformer(teacher_id)
+        E = np.zeros((len(vocab), 384), dtype=np.float32)
+        for a0 in range(0, len(vocab), 5000):
+            b0 = min(a0 + 5000, len(vocab))
+            E[a0:b0] = model.encode(vocab[a0:b0], batch_size=args.batch,
+                                    show_progress_bar=False)
+            print(f"  embedded {b0}/{len(vocab)} ({time.perf_counter() - t0:.0f}s)",
+                  flush=True)
+    else:
+        raise SystemExit(f"unknown teacher kind {kind!r} (use st: or m2v:)")
     embed_s = time.perf_counter() - t0
+    print(f"  teacher dim {E.shape[1]}, {embed_s:.0f}s")
 
     anis = fit_anisotropy(_unit_rows(E))
     print(f"anisotropy stats fit on all {len(vocab)} broad-vocabulary embeddings")
