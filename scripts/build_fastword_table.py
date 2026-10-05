@@ -123,6 +123,8 @@ def main() -> None:
                          "the teacher swap CubbyLLM's exp_m3_potion_baseline "
                          "measured at +0.05 routing macro over MiniLM)")
     ap.add_argument("--signal-blend", type=float, default=0.5)
+    ap.add_argument("--dump-teacher", default="",
+                    help="also save the raw teacher vectors (vocab, E) to this .npz")
     args = ap.parse_args()
 
     t_all = time.perf_counter()
@@ -158,17 +160,28 @@ def main() -> None:
         from sentence_transformers import SentenceTransformer
 
         model = SentenceTransformer(teacher_id)
-        E = np.zeros((len(vocab), 384), dtype=np.float32)
+        E = np.zeros((len(vocab), model.get_sentence_embedding_dimension()), dtype=np.float32)
         for a0 in range(0, len(vocab), 5000):
             b0 = min(a0 + 5000, len(vocab))
             E[a0:b0] = model.encode(vocab[a0:b0], batch_size=args.batch,
                                     show_progress_bar=False)
             print(f"  embedded {b0}/{len(vocab)} ({time.perf_counter() - t0:.0f}s)",
                   flush=True)
+    elif kind == "npz":
+        # precomputed teacher vectors for this exact vocabulary (e.g. a specialised
+        # copy of an earlier --dump-teacher), so a post-processed teacher builds
+        # through the same anisotropy / projection / blend path
+        z = np.load(teacher_id, allow_pickle=True)
+        if [str(w) for w in z["vocab"]] != vocab:
+            raise SystemExit("npz teacher: vocabulary differs from this build's")
+        E = np.asarray(z["E"], dtype=np.float32)
     else:
-        raise SystemExit(f"unknown teacher kind {kind!r} (use st: or m2v:)")
+        raise SystemExit(f"unknown teacher kind {kind!r} (use st:, m2v: or npz:)")
     embed_s = time.perf_counter() - t0
     print(f"  teacher dim {E.shape[1]}, {embed_s:.0f}s")
+    if args.dump_teacher:
+        np.savez(args.dump_teacher, vocab=np.array(vocab, dtype=object), E=E)
+        print(f"  teacher vectors -> {args.dump_teacher}")
 
     anis = fit_anisotropy(_unit_rows(E))
     print(f"anisotropy stats fit on all {len(vocab)} broad-vocabulary embeddings")
