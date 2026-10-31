@@ -172,19 +172,41 @@ class World(BaseWorld):
         bind-chain, quasi-orthogonal to its own parts, unusable for routing —
         the H-F2 M1 finding). Centroid routing beat max-over-individual-axioms
         0.680 vs 0.589 macro at ~40x fewer comparisons in CubbyLLM's
-        exp_m3_open_set screen. Recomputed per access (worlds hold few
-        axioms); an empty-axiom world falls back to its normalized random
-        signature so the property is always defined.
+        exp_m3_open_set screen. Computed from the member matrix, which is
+        stacked once per axiom count (``_member_matrix``); an empty-axiom
+        world falls back to its normalized random signature so the property
+        is always defined.
         """
         if not self.axioms:
             v = self._axiom_vec.astype(np.float64).ravel()
             return (v / (np.linalg.norm(v) + 1e-12)).reshape(
                 self._axiom_vec.shape).astype(np.float32)
-        M = np.stack([np.asarray(a.vector, dtype=np.float64).ravel()
-                      for a in self.axioms])
-        c = M.mean(axis=0)
-        return (c / (np.linalg.norm(c) + 1e-12)).reshape(
-            self.axioms[0].vector.shape).astype(np.float32)
+        n = len(self.axioms)
+        cache = getattr(self, "_centroid_cache", None)
+        if cache is None or cache[0] != n:
+            M, _norms = self._member_matrix()
+            c = M.mean(axis=0, dtype=np.float64)
+            cache = self._centroid_cache = (n, (c / (np.linalg.norm(c) + 1e-12)).reshape(
+                self.axioms[0].vector.shape).astype(np.float32))
+        return cache[1]
+
+    def _member_matrix(self) -> tuple[np.ndarray, np.ndarray]:
+        """(members, row norms): the world's axioms stacked once per axiom count.
+
+        A fact world at production width (k=80, l=128) holds thousands of members;
+        stacking them on every `best_member` / centroid access is a 100 MB copy per
+        query (the H-F2 M4 possibility screen). Keyed on len(axioms) so appending a
+        member (the CapsuleStore's `learn`) invalidates it; a world never mutates an
+        axiom in place."""
+        n = len(self.axioms)
+        cache = getattr(self, "_members_cache", None)
+        if cache is None or cache[0] != n:
+            M = np.stack([np.asarray(a.vector, dtype=np.float32).ravel()
+                          for a in self.axioms])
+            norms = np.linalg.norm(M, axis=1)
+            norms[norms == 0.0] = 1.0
+            cache = self._members_cache = (n, M, norms)
+        return cache[1], cache[2]
 
     def best_member(self, ctx: np.ndarray) -> tuple["Axiom | None", float]:
         """The world's internal lookup: its best-matching individual axiom.
@@ -197,14 +219,11 @@ class World(BaseWorld):
         """
         if not self.axioms:
             return None, -1.0
-        c = np.asarray(ctx, dtype=np.float64).ravel()
-        cn = np.linalg.norm(c)
+        c = np.asarray(ctx, dtype=np.float32).ravel()
+        cn = float(np.linalg.norm(c))
         if cn == 0.0:
             return None, -1.0
-        M = np.stack([np.asarray(a.vector, dtype=np.float64).ravel()
-                      for a in self.axioms])
-        norms = np.linalg.norm(M, axis=1)
-        norms[norms == 0.0] = 1.0
+        M, norms = self._member_matrix()
         sims = (M @ c) / (norms * cn)
         i = int(np.argmax(sims))
         return self.axioms[i], float(sims[i])
